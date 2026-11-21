@@ -18,6 +18,20 @@ class AgentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Customer ──
+
+class CustomerOut(BaseModel):
+    id: str
+    name: str
+    email: str
+    company: Optional[str] = ""
+    role: str = "customer"
+    is_active: bool = True
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Auth (v2) ──
 
 class LoginRequest(BaseModel):
@@ -28,7 +42,9 @@ class LoginRequest(BaseModel):
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    agent: AgentOut
+    user_type: str = "agent"  # agent | customer
+    agent: Optional[AgentOut] = None
+    customer: Optional[CustomerOut] = None
 
 
 # ── Ticket ──

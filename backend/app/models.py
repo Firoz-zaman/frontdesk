@@ -95,3 +95,17 @@ class AuditLog(Base):
     ticket = relationship("Ticket", back_populates="audit_logs")
 
 
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    name = Column(String(100), nullable=False)
+    email = Column(String(150), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False, default="")
+    company = Column(String(150), nullable=True, default="")
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+
+
+

@@ -4,13 +4,29 @@ v2: All agents seeded with Argon2id hash of default password "arvo2026!".
     Password hash is updated on each startup if the field is empty (migration-safe).
 """
 from datetime import datetime, timezone
-from .models import Agent, Ticket
+from .models import Agent, Ticket, Customer
 from .database import SessionLocal
 from .sla import compute_ticket_slas
 from .auth import hash_password, generate_customer_token
 
-# Default password for all seeded agents (documented; must be changed in production)
+# Default password for all seeded accounts (documented; change in production)
 _DEFAULT_PASSWORD = "arvo2026!"
+
+
+SEED_CUSTOMERS = [
+    {
+        "id": "c1000001-0000-0000-0000-000000000001",
+        "name": "Rahul Sharma",
+        "email": "customer@acmecorp.com",
+        "company": "Acme Corporation",
+    },
+    {
+        "id": "c1000001-0000-0000-0000-000000000002",
+        "name": "Nisha Patel",
+        "email": "nisha@globaltech.in",
+        "company": "GlobalTech Solutions",
+    },
+]
 
 
 SEED_AGENTS = [
@@ -113,5 +129,53 @@ def seed_database():
                 agent.password_hash = pwd_hash
             if agents:
                 db.commit()
+
+        # Seed or backfill Customers (v5)
+        pwd_hash = hash_password(_DEFAULT_PASSWORD)
+        for cust_data in SEED_CUSTOMERS:
+            existing = db.query(Customer).filter(Customer.email == cust_data["email"]).first()
+            if not existing:
+                db.add(Customer(**cust_data, password_hash=pwd_hash, is_active=True))
+            elif not existing.password_hash:
+                existing.password_hash = pwd_hash
+        db.commit()
+
+        # Ensure tickets exist for customer@acmecorp.com
+        rahul_tickets = db.query(Ticket).filter(Ticket.customer_email == "customer@acmecorp.com").all()
+        if not rahul_tickets:
+            now = datetime.now(timezone.utc)
+            t1 = Ticket(
+                id="INC-0501",
+                title="VPN certificate expired on Bangalore gateway",
+                description="Unable to connect to internal staging environment since our SSL VPN cert expired.",
+                customer_name="Rahul Sharma",
+                customer_email="customer@acmecorp.com",
+                priority="urgent",
+                status="waiting_on_customer",
+                sla_paused_at=now,
+                created_at=now,
+                customer_token_hash=generate_customer_token("INC-0501", "customer@acmecorp.com"),
+            )
+            resp_due, res_due = compute_ticket_slas(now, t1.priority)
+            t1.first_response_due_at = resp_due
+            t1.resolution_due_at = res_due
+            db.add(t1)
+
+            t2 = Ticket(
+                id="INC-0502",
+                title="Bulk CSV exports timing out on analytics dashboard",
+                description="Exporting Q3 report with >10,000 rows fails with gateway timeout 504.",
+                customer_name="Rahul Sharma",
+                customer_email="customer@acmecorp.com",
+                priority="medium",
+                status="in_progress",
+                created_at=now,
+                customer_token_hash=generate_customer_token("INC-0502", "customer@acmecorp.com"),
+            )
+            resp_due2, res_due2 = compute_ticket_slas(now, t2.priority)
+            t2.first_response_due_at = resp_due2
+            t2.resolution_due_at = res_due2
+            db.add(t2)
+            db.commit()
     finally:
         db.close()

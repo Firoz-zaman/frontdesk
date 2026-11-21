@@ -32,6 +32,8 @@ def get_current_agent(
 
     if raw_token:
         payload = decode_token(raw_token)
+        if payload.get("role") == "customer":
+            raise HTTPException(status_code=403, detail="Customer accounts cannot access agent helpdesk endpoints.")
         agent_id = payload.get("sub")
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.is_active == True).first()
         if not agent:
@@ -50,6 +52,77 @@ def get_current_agent(
         detail="Authorization header with Bearer token is required.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def get_current_customer(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """FastAPI dependency that resolves the authenticated customer."""
+    from ..models import Customer
+
+    raw_token: Optional[str] = None
+    if authorization and authorization.startswith("Bearer "):
+        raw_token = authorization.removeprefix("Bearer ").strip()
+    elif token:
+        raw_token = token.strip()
+
+    if raw_token:
+        payload = decode_token(raw_token)
+        customer_id = payload.get("sub")
+        customer = db.query(Customer).filter(Customer.id == customer_id, Customer.is_active == True).first()
+        if not customer:
+            raise HTTPException(status_code=401, detail="Customer account not found or deactivated.")
+        customer._from_jwt = True
+        return customer
+
+    if not settings.REQUIRE_AUTH:
+        cust = db.query(Customer).filter(Customer.email == "customer@acmecorp.com").first()
+        if cust:
+            return cust
+
+    raise HTTPException(
+        status_code=401,
+        detail="Customer authorization header with Bearer token is required.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Resolve authenticated user as either ('agent', Agent) or ('customer', Customer)."""
+    from ..models import Agent, Customer
+
+    raw_token: Optional[str] = None
+    if authorization and authorization.startswith("Bearer "):
+        raw_token = authorization.removeprefix("Bearer ").strip()
+    elif token:
+        raw_token = token.strip()
+
+    if raw_token:
+        payload = decode_token(raw_token)
+        user_id = payload.get("sub")
+        role = payload.get("role")
+        if role == "customer":
+            cust = db.query(Customer).filter(Customer.id == user_id, Customer.is_active == True).first()
+            if not cust:
+                raise HTTPException(status_code=401, detail="Customer account not found.")
+            return "customer", cust
+        else:
+            agent = db.query(Agent).filter(Agent.id == user_id, Agent.is_active == True).first()
+            if not agent:
+                raise HTTPException(status_code=401, detail="Agent account not found.")
+            return "agent", agent
+
+    if not settings.REQUIRE_AUTH:
+        lead = db.query(Agent).filter(Agent.role == "lead").first()
+        return "agent", lead
+
+    raise HTTPException(status_code=401, detail="Bearer token required.")
 
 
 def get_effective_agent(
