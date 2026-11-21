@@ -126,8 +126,17 @@ def get_ticket(ticket_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{ticket_id}/claim", response_model=TicketOut)
-def claim_ticket(ticket_id: str, payload: ClaimRequest, db: Session = Depends(get_db)):
-    agent = db.query(Agent).filter(Agent.id == payload.agent_id).first()
+def claim_ticket(
+    ticket_id: str,
+    payload: ClaimRequest,
+    db: Session = Depends(get_db),
+    current_agent: Agent = Depends(get_current_agent),
+):
+    target_agent_id = payload.agent_id
+    if getattr(current_agent, "_from_jwt", False) and current_agent.role not in ("lead", "admin"):
+        target_agent_id = current_agent.id
+
+    agent = db.query(Agent).filter(Agent.id == target_agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 

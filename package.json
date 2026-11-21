@@ -8,6 +8,7 @@
     "start": "./run.sh",
     "build": "cd frontend && npm run build",
     "test": "backend/venv/bin/python3 -m unittest discover -s backend/tests",
-    "test:e2e": "backend/venv/bin/python3 backend/tests/test_v3_production_e2e.py"
+    "test:e2e": "backend/venv/bin/python3 backend/tests/test_v3_production_e2e.py",
+    "test:customer": "backend/venv/bin/python3 backend/tests/test_v5_customer_e2e.py"
   }
 }
