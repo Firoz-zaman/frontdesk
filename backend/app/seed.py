@@ -1,8 +1,16 @@
-"""Seed data — 9 agents (Meera + 8 team) and sample tickets."""
+"""Seed data — 9 agents (Meera + 8 team) and sample tickets.
+
+v2: All agents seeded with Argon2id hash of default password "arvo2026!".
+    Password hash is updated on each startup if the field is empty (migration-safe).
+"""
 from datetime import datetime, timezone
 from .models import Agent, Ticket
 from .database import SessionLocal
 from .sla import compute_ticket_slas
+from .auth import hash_password, generate_customer_token
+
+# Default password for all seeded agents (documented; must be changed in production)
+_DEFAULT_PASSWORD = "arvo2026!"
 
 
 SEED_AGENTS = [
@@ -69,23 +77,41 @@ SEED_TICKETS = [
 
 
 def seed_database():
-    """Insert seed data if the database is empty."""
+    """Insert seed data if the database is empty.
+
+    v2 migration: If agents already exist but have an empty password_hash,
+    backfill with the default Argon2id hash. This is idempotent and safe to
+    run on every startup against an existing database.
+    """
     db = SessionLocal()
     try:
-        if db.query(Agent).count() > 0:
-            return  # Already seeded
-        now = datetime.now(timezone.utc)
-        for agent_data in SEED_AGENTS:
-            db.add(Agent(**agent_data))
-        for ticket_data in SEED_TICKETS:
-            t = Ticket(**ticket_data)
-            t.created_at = now
-            resp_due, res_due = compute_ticket_slas(now, t.priority)
-            t.first_response_due_at = resp_due
-            t.resolution_due_at = res_due
-            if t.status == "waiting_on_customer":
-                t.sla_paused_at = now
-            db.add(t)
-        db.commit()
+        if db.query(Agent).count() == 0:
+            # Fresh database: insert all agents and tickets
+            now = datetime.now(timezone.utc)
+            pwd_hash = hash_password(_DEFAULT_PASSWORD)
+            for agent_data in SEED_AGENTS:
+                db.add(Agent(**agent_data, password_hash=pwd_hash))
+            for ticket_data in SEED_TICKETS:
+                t = Ticket(**ticket_data)
+                t.created_at = now
+                resp_due, res_due = compute_ticket_slas(now, t.priority)
+                t.first_response_due_at = resp_due
+                t.resolution_due_at = res_due
+                if t.status == "waiting_on_customer":
+                    t.sla_paused_at = now
+                # Generate customer magic link token
+                t.customer_token_hash = generate_customer_token(t.id, t.customer_email)
+                db.add(t)
+            db.commit()
+        else:
+            # Existing database: backfill password hashes if missing (v2 migration)
+            pwd_hash = hash_password(_DEFAULT_PASSWORD)
+            agents = db.query(Agent).filter(
+                (Agent.password_hash == None) | (Agent.password_hash == "")
+            ).all()
+            for agent in agents:
+                agent.password_hash = pwd_hash
+            if agents:
+                db.commit()
     finally:
         db.close()

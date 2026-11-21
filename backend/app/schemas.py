@@ -13,8 +13,22 @@ class AgentOut(BaseModel):
     email: str
     role: str
     created_at: datetime
+    is_active: bool = True
 
     model_config = {"from_attributes": True}
+
+
+# ── Auth (v2) ──
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    agent: AgentOut
 
 
 # ── Ticket ──

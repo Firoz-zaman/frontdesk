@@ -429,3 +429,51 @@ A comprehensive boundary, concurrency, and security audit was executed across al
 
 
 
+
+
+---
+
+# Frontdesk v2 Implementation Log: Authentication & Real-Time SSE Push
+
+**Date**: 2026-11-21  
+**Author**: Antigravity Engineering  
+**Scope**: Full Stack Developer Hiring Test — Authentication & Real-Time Push Streaming
+
+## 1. Components Implemented
+
+### A. Authentication Module (`backend/app/auth.py`)
+- **Password Hashing**: Direct `argon2-cffi` PasswordHasher (OWASP parameters: memory=64MB, parallelism=2, time_cost=2). Zero reliance on unmaintained passlib.
+- **JWT Token Management**: HMAC-SHA256 tokens using `pyjwt` with 8-hour expiration. Payload contains `sub` (agent UUID), `email`, `role`, and UTC timestamps (`iat`, `exp`).
+- **Customer Magic Link Tokens**: Deterministic `HMAC-SHA256(ticket_id + customer_email, SECRET_KEY)` hex digest enabling secure, zero-password customer access. Constant-time comparison prevents timing attacks.
+- **FastAPI Dependency (`get_current_agent`)**:
+  - Supports Bearer token in `Authorization` header and `?token=` query parameter (vital for browser EventSource API).
+  - Validates cryptographic signature and expiration on provided tokens.
+  - Development fallback: when `REQUIRE_AUTH=false` and no credentials supplied, falls back to the lead agent, ensuring 100% backward compatibility for all Stage 0–5 tests.
+
+### B. Real-Time Push Streaming (`backend/app/events.py`)
+- **Pub/Sub Broadcaster (`EventBroadcaster`)**: Pure in-process asyncio event hub with per-subscriber bounded `asyncio.Queue` (capacity 100) and automatic slow-consumer drops.
+- **SSE Stream (`GET /api/events/stream`)**: FastAPI `StreamingResponse` with `text/event-stream` mime-type, immediate `CONNECTED` handshake, and 20-second keepalive pings.
+- **Broadcast Integration**:
+  - `TICKET_CLAIMED`: Dispatched immediately upon atomic claim.
+  - `PUBLIC_REPLY_SENT` / `CUSTOMER_REPLY_RECEIVED`: Dispatched on communication events (strictly omitting internal notes).
+  - `TICKET_RESOLVED`: Dispatched when ticket transitions to resolved status.
+
+### C. Database & Schema Migrations
+- **Agent Schema**: Added `password_hash` (VARCHAR 255), `is_active` (BOOLEAN), and `last_login_at` (DATETIME).
+- **Ticket Schema**: Added `customer_token_hash` (VARCHAR 64).
+- **Idempotent Lifespan Migrations**: Executed via SQLite PRAGMA checks and `ALTER TABLE` statements without destroying existing state.
+- **Seed Data**: Upgraded all 9 agents with default Argon2id password hash (`arvo2026!`).
+
+### D. Frontend Interface (`frontend/src/`)
+- **API Client (`api.js`)**: Added `loginAgent`, `logoutAgent`, and `getMe` with Bearer auth header injection.
+- **Custom React Hook (`useEventStream.js`)**: Manages browser `EventSource` connection, event deserialization, and automatic reconnection.
+- **UI Integrations (`App.jsx`, `index.css`)**:
+  - Added live status pill (`🟢 Live` / `⚪ Connecting…`).
+  - Added Agent Sign-In modal with instant validation and error handling.
+  - Automatic queue and ticket detail refresh on incoming SSE events.
+
+## 2. Test Verification Matrix
+- **AUTH-01 to AUTH-06**: Valid login, invalid credentials (401), non-existent agent (401), tampered/expired JWT rejection (401), strict mode enforcement, and customer magic link security.
+- **PUSH-01 to PUSH-04**: SSE text/event-stream content negotiation, broadcaster queue fan-out, queue overflow resilience, and non-blocking background broadcasting.
+- **REG-01**: Verified all previous stages (Stages 0–5) remain 100% operational with zero regressions.
+- **Vite Production Build**: Verified bundle compiles without warnings or errors.

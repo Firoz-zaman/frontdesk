@@ -25,6 +25,11 @@ class Agent(Base):
     role = Column(String(20), nullable=False, default="agent")  # agent | lead | admin
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
+    # v2: Authentication fields (added via ALTER TABLE migration in lifespan)
+    password_hash = Column(String(255), nullable=False, default="")
+    is_active = Column(Boolean, nullable=False, default=True)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationship (back-ref from tickets)
     assigned_tickets = relationship("Ticket", back_populates="assigned_agent")
 
@@ -50,6 +55,9 @@ class Ticket(Base):
     closed_at = Column(DateTime(timezone=True), nullable=True)
     sla_paused_at = Column(DateTime(timezone=True), nullable=True)
     total_paused_minutes = Column(Integer, default=0, nullable=False)
+
+    # v2: Customer magic link token hash for self-service ticket access
+    customer_token_hash = Column(String(64), nullable=True)
 
     # Relationship
     assigned_agent = relationship("Agent", back_populates="assigned_tickets")

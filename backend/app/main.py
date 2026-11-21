@@ -3,8 +3,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy import update, text
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,8 @@ from .database import engine, get_db, Base
 from .models import Agent, Ticket, Message, AuditLog
 from .schemas import (
     AgentOut,
+    LoginRequest,
+    TokenOut,
     TicketCreate,
     TicketOut,
     ClaimRequest,
@@ -26,6 +29,13 @@ from .schemas import (
 from .seed import seed_database
 from .utils import next_ticket_id
 from .audit import log_audit
+from .auth import (
+    verify_password,
+    create_access_token,
+    generate_customer_token,
+    get_current_agent,
+)
+from .events import broadcaster, event_generator
 from .sla import (
     compute_ticket_slas,
     recalculate_sla_on_priority_change,
@@ -44,14 +54,28 @@ from .lifecycle import (
 async def lifespan(app: FastAPI):
     # Create tables and seed on startup
     Base.metadata.create_all(bind=engine)
-    try:
-        with engine.connect() as conn:
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(tickets)"))]
-            if "closed_at" not in cols:
-                conn.execute(text("ALTER TABLE tickets ADD COLUMN closed_at DATETIME"))
-                conn.commit()
-    except Exception:
-        pass
+    # ── Schema migrations (idempotent ALTER TABLE) ──────────────────────────────
+    with engine.connect() as conn:
+        # Stage 5: closed_at on tickets
+        ticket_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(tickets)"))]
+        if "closed_at" not in ticket_cols:
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN closed_at DATETIME"))
+            conn.commit()
+        # v2: customer_token_hash on tickets
+        if "customer_token_hash" not in ticket_cols:
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN customer_token_hash VARCHAR(64)"))
+            conn.commit()
+        # v2: auth fields on agents
+        agent_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(agents)"))]
+        if "password_hash" not in agent_cols:
+            conn.execute(text("ALTER TABLE agents ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ''"))
+            conn.commit()
+        if "is_active" not in agent_cols:
+            conn.execute(text("ALTER TABLE agents ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+            conn.commit()
+        if "last_login_at" not in agent_cols:
+            conn.execute(text("ALTER TABLE agents ADD COLUMN last_login_at DATETIME"))
+            conn.commit()
     seed_database()
     yield
 
@@ -73,6 +97,49 @@ app.add_middleware(
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": "0.1.0"}
+
+
+# ── Auth (v2) ──
+
+@app.post("/api/auth/login", response_model=TokenOut)
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    """Authenticate an agent with email + password. Returns a signed JWT."""
+    agent = db.query(Agent).filter(
+        Agent.email == payload.email,
+        Agent.is_active == True,
+    ).first()
+    if not agent or not verify_password(payload.password, agent.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    agent.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(agent)
+    token = create_access_token(agent.id, agent.email, agent.role)
+    return TokenOut(access_token=token, agent=AgentOut.model_validate(agent))
+
+
+@app.get("/api/auth/me", response_model=AgentOut)
+def get_me(current_agent: Agent = Depends(get_current_agent)):
+    """Return the currently authenticated agent's profile."""
+    return AgentOut.model_validate(current_agent)
+
+
+# ── SSE Real-Time Events (v2) ──
+
+@app.get("/api/events/stream")
+async def event_stream(
+    request: Request,
+    current_agent: Agent = Depends(get_current_agent),
+):
+    """Server-Sent Events endpoint. Streams real-time typed events to connected agents."""
+    queue = await broadcaster.subscribe()
+    return StreamingResponse(
+        event_generator(request, queue),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable Nginx buffering
+        },
+    )
 
 
 # ── Agents ──
@@ -149,6 +216,8 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)):
         created_at=now,
         first_response_due_at=first_resp_due,
         resolution_due_at=res_due,
+        # v2: Generate customer magic link token for self-service access
+        customer_token_hash=generate_customer_token(ticket_id, payload.customer_email),
     )
     db.add(ticket)
     db.commit()
@@ -233,6 +302,19 @@ def claim_ticket(ticket_id: str, payload: ClaimRequest, db: Session = Depends(ge
             "status": "in_progress",
         },
     )
+
+    # v2: Broadcast real-time event to all connected SSE clients
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(broadcaster.broadcast("TICKET_CLAIMED", {
+                "ticket_id": ticket_id,
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+            }))
+    except Exception:
+        pass  # Broadcast failure must never break the primary request
 
     return _ticket_to_out(ticket)
 
@@ -377,6 +459,21 @@ def post_ticket_message(
         },
     )
 
+    # v2: Broadcast real-time event (only public messages — never expose private notes)
+    if not is_private:
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(broadcaster.broadcast(action, {
+                    "ticket_id": ticket_id,
+                    "sender_type": sender_type,
+                    "sender_name": sender_name,
+                    "preview": payload.content[:80],
+                }))
+        except Exception:
+            pass  # Broadcast failure must never break the primary request
+
     return MessageOut.model_validate(message)
 
 
@@ -511,6 +608,20 @@ def resolve_ticket(
 
     db.commit()
     db.refresh(ticket)
+
+    # v2: Broadcast TICKET_RESOLVED event to all connected SSE clients
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(broadcaster.broadcast("TICKET_RESOLVED", {
+                "ticket_id": ticket_id,
+                "resolved_by": actor_name,
+                "resolved_at": now.isoformat(),
+            }))
+    except Exception:
+        pass  # Broadcast failure must never break the primary request
+
     return _ticket_to_out(ticket)
 
 

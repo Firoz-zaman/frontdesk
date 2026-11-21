@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket, fetchMessages, postMessage, fetchAuditLogs, updatePriority, resolveTicket, reopenTicket } from './api.js';
+import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket, fetchMessages, postMessage, fetchAuditLogs, updatePriority, resolveTicket, reopenTicket, loginAgent, logoutAgent, getMe } from './api.js';
+import { useEventStream } from './useEventStream.js';
 
 const FILTERS = [
   { label: 'All', value: '' },
@@ -29,6 +30,63 @@ function SlaChip({ slaStatus }) {
     <span className={`sla-chip ${slaStatus.badge_class || 'sla-chip-healthy'}`}>
       {slaStatus.label}
     </span>
+  );
+}
+
+// ── Login Modal (v2 Auth) ──
+function LoginModal({ onClose, onLoggedIn }) {
+  const [form, setForm] = useState({ email: '', password: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      const data = await loginAgent(form.email, form.password);
+      onLoggedIn(data.agent);
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal login-modal" onClick={e => e.stopPropagation()}>
+        <h2>Agent Login</h2>
+        {error && <div className="login-error">{error}</div>}
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label>Email</label>
+            <input
+              required type="email" autoFocus
+              value={form.email}
+              onChange={e => setForm({ ...form, email: e.target.value })}
+              placeholder="meera@arvo.in"
+            />
+          </div>
+          <div className="form-group">
+            <label>Password</label>
+            <input
+              required type="password"
+              value={form.password}
+              onChange={e => setForm({ ...form, password: e.target.value })}
+              placeholder="••••••••"
+            />
+          </div>
+          <div className="form-actions">
+            <button type="button" className="btn-cancel" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn-submit" disabled={submitting}>
+              {submitting ? 'Signing in…' : 'Sign In'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -566,15 +624,21 @@ export default function App() {
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [filter, setFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
   const [claiming, setClaiming] = useState(false);
+  const [liveConnected, setLiveConnected] = useState(false);
 
-  // Load agents once
+  // Load agents once; also check for existing JWT session
   useEffect(() => {
     fetchAgents().then(data => {
       setAgents(data);
       // Default to Meera (the lead)
       const meera = data.find(a => a.role === 'lead') || data[0];
       if (meera) setCurrentAgent(meera);
+    });
+    // Restore session from stored JWT
+    getMe().then(agent => {
+      if (agent) setCurrentAgent(agent);
     });
   }, []);
 
@@ -593,6 +657,23 @@ export default function App() {
       setSelectedTicket(null);
     }
   }, [selectedId]);
+
+  // SSE real-time event handler (v2)
+  const handleEvent = useCallback((eventType, data) => {
+    if (eventType === 'CONNECTED') {
+      setLiveConnected(true);
+      return;
+    }
+    // Auto-refresh ticket list on relevant events
+    if (['TICKET_CLAIMED', 'PUBLIC_REPLY_SENT', 'CUSTOMER_REPLY_RECEIVED', 'TICKET_RESOLVED'].includes(eventType)) {
+      loadTickets();
+      if (selectedId && data.ticket_id === selectedId) {
+        fetchTicket(selectedId).then(setSelectedTicket).catch(console.error);
+      }
+    }
+  }, [loadTickets, selectedId]);
+
+  useEventStream(handleEvent);
 
   // Handle claiming ticket atomically (INC-0291)
   const handleClaim = async (ticketId) => {
@@ -615,13 +696,28 @@ export default function App() {
     }
   };
 
+  const handleLogout = () => {
+    logoutAgent();
+    // Revert to default agent (dev mode)
+    const meera = agents.find(a => a.role === 'lead') || agents[0];
+    if (meera) setCurrentAgent(meera);
+  };
+
+  const isLoggedInWithJwt = !!localStorage.getItem('frontdesk_token');
+
   return (
     <>
       {/* Navbar */}
       <nav className="navbar">
         <h1>FRONTDESK</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {currentAgent && (
+          {/* v2: Live connection status pill */}
+          <span className={`connection-pill ${liveConnected ? 'live' : 'offline'}`}>
+            {liveConnected ? '🟢 Live' : '⚪ Connecting…'}
+          </span>
+
+          {/* Agent switcher (dev mode fallback when not JWT-authenticated) */}
+          {currentAgent && !isLoggedInWithJwt && (
             <select
               value={currentAgent.id}
               onChange={e => {
@@ -635,6 +731,18 @@ export default function App() {
                 </option>
               ))}
             </select>
+          )}
+
+          {/* v2: JWT auth controls */}
+          {isLoggedInWithJwt ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '0.85rem', color: '#d1fae5' }}>
+                {currentAgent?.name}
+              </span>
+              <button className="btn-logout" onClick={handleLogout}>Sign Out</button>
+            </div>
+          ) : (
+            <button className="btn-login" onClick={() => setShowLogin(true)}>Sign In</button>
           )}
         </div>
       </nav>
@@ -691,6 +799,14 @@ export default function App() {
         <CreateTicketModal
           onClose={() => setShowCreate(false)}
           onCreated={loadTickets}
+        />
+      )}
+
+      {/* Login Modal (v2) */}
+      {showLogin && (
+        <LoginModal
+          onClose={() => setShowLogin(false)}
+          onLoggedIn={(agent) => setCurrentAgent(agent)}
         />
       )}
     </>

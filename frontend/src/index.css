@@ -824,3 +824,76 @@ body {
 
 
 
+
+/* ── v2: Connection Status Pill ───────────────────────────────────────────── */
+.connection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  transition: all 0.3s ease;
+}
+
+.connection-pill.live {
+  background: rgba(16, 185, 129, 0.2);
+  color: #d1fae5;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.connection-pill.offline {
+  background: rgba(156, 163, 175, 0.2);
+  color: #d1d5db;
+  border: 1px solid rgba(156, 163, 175, 0.3);
+}
+
+/* ── v2: Auth Buttons ─────────────────────────────────────────────────────── */
+.btn-login {
+  padding: 6px 14px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-login:hover {
+  background: #2563eb;
+}
+
+.btn-logout {
+  padding: 5px 12px;
+  background: transparent;
+  color: #fca5a5;
+  border: 1px solid rgba(252, 165, 165, 0.4);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-logout:hover {
+  background: rgba(252, 165, 165, 0.1);
+  border-color: #fca5a5;
+}
+
+/* ── v2: Login Modal ──────────────────────────────────────────────────────── */
+.login-modal {
+  max-width: 380px;
+}
+
+.login-error {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}

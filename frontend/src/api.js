@@ -1,5 +1,37 @@
 const API = '';  // Vite proxy handles /api -> localhost:8000
 
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+
+function authHeaders() {
+  const token = localStorage.getItem('frontdesk_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
+export async function loginAgent(email, password) {
+  const res = await fetch(`${API}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Invalid email or password');
+  }
+  const data = await res.json();
+  localStorage.setItem('frontdesk_token', data.access_token);
+  return data;
+}
+
+export function logoutAgent() {
+  localStorage.removeItem('frontdesk_token');
+}
+
+export async function getMe() {
+  const res = await fetch(`${API}/api/auth/me`, { headers: authHeaders() });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 export async function fetchAgents() {
   const res = await fetch(`${API}/api/agents`);
   if (!res.ok) throw new Error('Failed to fetch agents');
