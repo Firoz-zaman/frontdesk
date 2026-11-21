@@ -186,6 +186,118 @@ class TestAuth06CustomerMagicLink(unittest.TestCase):
         )
 
 
+# ── AUTH-07: Ticket Ownership & RBAC Authorization Guards ─────────────────────
+
+class TestAuth07TicketOwnership(unittest.TestCase):
+    AGENT_RAVI_ID = "a1000001-0000-0000-0000-000000000002"
+    AGENT_RAVI_EMAIL = "ravi@arvo.in"
+    AGENT_ARJUN_ID = "a1000001-0000-0000-0000-000000000004"
+    AGENT_ARJUN_EMAIL = "arjun@arvo.in"
+
+    def _login(self, email):
+        resp = api("/api/auth/login", "POST", json={"email": email, "password": CORRECT_PASSWORD})
+        self.assertEqual(resp.status_code, 200, f"Login failed for {email}: {resp.text}")
+        return resp.json()["access_token"]
+
+    def _create_and_claim_ticket_as_ravi(self):
+        # Create ticket
+        res = api("/api/tickets", "POST", json={
+            "title": "Ownership Test Ticket",
+            "description": "Testing agent access control",
+            "customer_name": "Acme User",
+            "customer_email": "acme@example.com",
+            "priority": "small",
+        })
+        self.assertEqual(res.status_code, 201)
+        ticket_id = res.json()["id"]
+
+        # Claim as Ravi
+        claim_res = api(f"/api/tickets/{ticket_id}/claim", "POST", json={"agent_id": self.AGENT_RAVI_ID})
+        self.assertEqual(claim_res.status_code, 200)
+        return ticket_id
+
+    def test_non_assigned_agent_cannot_resolve_ticket(self):
+        """Arjun (regular agent) cannot resolve a ticket assigned to Ravi -> 403 Forbidden."""
+        ticket_id = self._create_and_claim_ticket_as_ravi()
+        arjun_token = self._login(self.AGENT_ARJUN_EMAIL)
+
+        resp = api(
+            f"/api/tickets/{ticket_id}/resolve",
+            "POST",
+            headers={"Authorization": f"Bearer {arjun_token}"},
+        )
+        self.assertEqual(resp.status_code, 403, f"Expected 403 Forbidden, got {resp.status_code}: {resp.text}")
+        self.assertIn("Forbidden", resp.json()["detail"])
+        self.assertIn("Ravi", resp.json()["detail"])
+
+    def test_non_assigned_agent_cannot_change_priority(self):
+        """Arjun cannot change priority on a ticket assigned to Ravi -> 403 Forbidden."""
+        ticket_id = self._create_and_claim_ticket_as_ravi()
+        arjun_token = self._login(self.AGENT_ARJUN_EMAIL)
+
+        resp = api(
+            f"/api/tickets/{ticket_id}/priority",
+            "PATCH",
+            headers={"Authorization": f"Bearer {arjun_token}"},
+            json={"priority": "urgent"},
+        )
+        self.assertEqual(resp.status_code, 403, f"Expected 403 Forbidden, got {resp.status_code}: {resp.text}")
+        self.assertIn("Forbidden", resp.json()["detail"])
+
+    def test_non_assigned_agent_cannot_send_public_reply(self):
+        """Arjun cannot send public customer replies on a ticket assigned to Ravi -> 403 Forbidden."""
+        ticket_id = self._create_and_claim_ticket_as_ravi()
+        arjun_token = self._login(self.AGENT_ARJUN_EMAIL)
+
+        resp = api(
+            f"/api/tickets/{ticket_id}/messages",
+            "POST",
+            headers={"Authorization": f"Bearer {arjun_token}"},
+            json={
+                "content": "Hi customer, I am hijacking this ticket.",
+                "is_private": False,
+                "sender_type": "agent",
+            },
+        )
+        self.assertEqual(resp.status_code, 403, f"Expected 403 Forbidden, got {resp.status_code}: {resp.text}")
+
+    def test_assigned_agent_can_modify_and_resolve(self):
+        """Ravi (assigned agent) can change priority and resolve his own ticket -> 200 OK."""
+        ticket_id = self._create_and_claim_ticket_as_ravi()
+        ravi_token = self._login(self.AGENT_RAVI_EMAIL)
+
+        # Priority update
+        p_resp = api(
+            f"/api/tickets/{ticket_id}/priority",
+            "PATCH",
+            headers={"Authorization": f"Bearer {ravi_token}"},
+            json={"priority": "medium"},
+        )
+        self.assertEqual(p_resp.status_code, 200)
+
+        # Resolve
+        r_resp = api(
+            f"/api/tickets/{ticket_id}/resolve",
+            "POST",
+            headers={"Authorization": f"Bearer {ravi_token}"},
+        )
+        self.assertEqual(r_resp.status_code, 200)
+        self.assertEqual(r_resp.json()["status"], "done")
+
+    def test_lead_agent_can_override_and_resolve(self):
+        """Meera (team lead) has supervisory privileges to resolve any assigned ticket -> 200 OK."""
+        ticket_id = self._create_and_claim_ticket_as_ravi()
+        meera_token = self._login(AGENT_MEERA_EMAIL)
+
+        r_resp = api(
+            f"/api/tickets/{ticket_id}/resolve",
+            "POST",
+            headers={"Authorization": f"Bearer {meera_token}"},
+        )
+        self.assertEqual(r_resp.status_code, 200)
+        self.assertEqual(r_resp.json()["status"], "done")
+
+
 # ── PUSH-01: SSE endpoint returns correct content-type ────────────────────────
 
 class TestPush01SseContentType(unittest.TestCase):

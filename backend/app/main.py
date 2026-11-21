@@ -240,6 +240,41 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)):
     return _ticket_to_out(ticket)
 
 
+# ── Ownership & Role-Based Authorization Helpers ───────────────────────────────
+
+def _get_effective_agent(
+    db: Session,
+    current_agent: Agent,
+    explicit_agent_id: Optional[str] = None,
+) -> Agent:
+    """Resolve acting agent.
+    If authenticated via JWT as a regular agent (not lead/admin),
+    the token identity cannot be spoofed via explicit_agent_id.
+    """
+    if getattr(current_agent, "_from_jwt", False) and current_agent.role not in ("lead", "admin"):
+        return current_agent
+
+    if explicit_agent_id:
+        target = db.query(Agent).filter(Agent.id == explicit_agent_id).first()
+        if target:
+            return target
+    return current_agent
+
+
+def verify_ticket_ownership(ticket: Ticket, agent: Agent, action: str = "modify"):
+    """Enforce ticket ownership:
+    If a ticket is assigned to an agent, another regular agent cannot modify it.
+    Only the assigned agent or a lead/admin can modify an assigned ticket.
+    """
+    if ticket.assigned_agent_id is not None and ticket.assigned_agent_id != agent.id:
+        if agent.role not in ("lead", "admin"):
+            assigned_name = ticket.assigned_agent.name if ticket.assigned_agent else "another agent"
+            raise HTTPException(
+                status_code=403,
+                detail=f"Forbidden: You cannot {action} a ticket assigned to {assigned_name}.",
+            )
+
+
 # ── Module 1: Atomic Claiming (INC-0291) ──
 
 @app.post("/api/tickets/{ticket_id}/claim", response_model=TicketOut)
@@ -370,6 +405,7 @@ def list_ticket_messages(
 def post_ticket_message(
     ticket_id: str,
     payload: MessageCreate,
+    current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db),
 ):
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
@@ -398,11 +434,10 @@ def post_ticket_message(
             ticket.resolved_at = None
             ticket.closed_at = None
     elif sender_type == "agent":
-        if payload.sender_id and not sender_name:
-            agent = db.query(Agent).filter(Agent.id == payload.sender_id).first()
-            if agent:
-                sender_name = agent.name
-        sender_name = sender_name or "Support Agent"
+        acting_agent = _get_effective_agent(db, current_agent, payload.sender_id)
+        if not is_private:
+            verify_ticket_ownership(ticket, acting_agent, action="send public replies on")
+        sender_name = sender_name or acting_agent.name
 
     message = Message(
         ticket_id=ticket_id,
@@ -504,6 +539,7 @@ def update_ticket_priority(
     ticket_id: str,
     payload: PriorityUpdateRequest,
     agent_id: Optional[str] = Query(None),
+    current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db),
 ):
     """Answers the unanswered meeting question:
@@ -517,6 +553,10 @@ def update_ticket_priority(
 
     if ticket.status in ("done", "closed"):
         raise HTTPException(status_code=400, detail="Cannot change priority of a resolved or closed ticket.")
+
+    # Ownership guard: only assigned agent or lead/admin can change priority
+    acting_agent = _get_effective_agent(db, current_agent, payload.agent_id or agent_id)
+    verify_ticket_ownership(ticket, acting_agent, action="change priority on")
 
     new_p = payload.priority.lower()
     if new_p not in ("urgent", "medium", "small"):
@@ -539,12 +579,8 @@ def update_ticket_priority(
     ticket.resolution_due_at = new_res
 
     # Audit the escalation
-    effective_agent_id = payload.agent_id or agent_id
-    actor_name = "Support Agent"
-    if effective_agent_id:
-        agent = db.query(Agent).filter(Agent.id == effective_agent_id).first()
-        if agent:
-            actor_name = agent.name
+    effective_agent_id = acting_agent.id
+    actor_name = acting_agent.name
 
     log_audit(
         db=db,
@@ -571,6 +607,7 @@ def resolve_ticket(
     ticket_id: str,
     payload: Optional[ResolveTicketRequest] = None,
     agent_id: Optional[str] = Query(None),
+    current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db),
 ):
     """Mark a ticket as resolved ('done')."""
@@ -581,17 +618,17 @@ def resolve_ticket(
     if ticket.status in ("done", "closed"):
         raise HTTPException(status_code=400, detail="Ticket is already resolved or closed.")
 
+    # Ownership guard: only assigned agent or lead/admin can resolve
+    acting_agent = _get_effective_agent(db, current_agent, (payload.agent_id if payload else None) or agent_id)
+    verify_ticket_ownership(ticket, acting_agent, action="resolve")
+
     now = datetime.now(timezone.utc)
     ticket.status = "done"
     ticket.resolved_at = now
     ticket.sla_paused_at = None
 
-    effective_agent_id = (payload.agent_id if payload else None) or agent_id
-    actor_name = "Support Agent"
-    if effective_agent_id:
-        agent = db.query(Agent).filter(Agent.id == effective_agent_id).first()
-        if agent:
-            actor_name = agent.name
+    effective_agent_id = acting_agent.id
+    actor_name = acting_agent.name
 
     log_audit(
         db=db,
@@ -632,6 +669,7 @@ def reopen_ticket(
     ticket_id: str,
     payload: Optional[ReopenTicketRequest] = None,
     agent_id: Optional[str] = Query(None),
+    current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db),
 ):
     """Enforce REQ-SLA-05: Reopen allowed within 7 calendar days of resolution/closure.
@@ -645,6 +683,10 @@ def reopen_ticket(
     if not allowed:
         raise HTTPException(status_code=400, detail=reason)
 
+    # Ownership guard: only assigned agent or lead/admin can reopen
+    acting_agent = _get_effective_agent(db, current_agent, (payload.agent_id if payload else None) or agent_id)
+    verify_ticket_ownership(ticket, acting_agent, action="reopen")
+
     now = datetime.now(timezone.utc)
     prev_status = ticket.status
     ticket.status = "in_progress"
@@ -652,8 +694,8 @@ def reopen_ticket(
     ticket.closed_at = None
     ticket.sla_paused_at = None
 
-    effective_agent_id = (payload.agent_id if payload else None) or agent_id
-    actor_name = "Support Agent"
+    effective_agent_id = acting_agent.id
+    actor_name = acting_agent.name
     if effective_agent_id:
         agent = db.query(Agent).filter(Agent.id == effective_agent_id).first()
         if agent:

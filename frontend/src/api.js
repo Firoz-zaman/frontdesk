@@ -64,7 +64,7 @@ export async function createTicket(data) {
 export async function claimTicket(ticketId, agentId) {
   const res = await fetch(`${API}/api/tickets/${ticketId}/claim`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ agent_id: agentId }),
   });
   if (res.status === 409) {
@@ -86,10 +86,13 @@ export async function fetchMessages(ticketId, scope = 'agent') {
 export async function postMessage(ticketId, messageData) {
   const res = await fetch(`${API}/api/tickets/${ticketId}/messages`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(messageData),
   });
-  if (!res.ok) throw new Error('Failed to post message');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to post message');
+  }
   return res.json();
 }
 
@@ -103,7 +106,7 @@ export async function fetchAuditLogs(ticketId) {
 export async function updatePriority(ticketId, priority, agentId) {
   const res = await fetch(`${API}/api/tickets/${ticketId}/priority`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ priority, agent_id: agentId }),
   });
   if (!res.ok) {
@@ -116,7 +119,7 @@ export async function updatePriority(ticketId, priority, agentId) {
 export async function resolveTicket(ticketId, agentId) {
   const res = await fetch(`${API}/api/tickets/${ticketId}/resolve`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ agent_id: agentId }),
   });
   if (!res.ok) {
@@ -130,7 +133,7 @@ export async function resolveTicket(ticketId, agentId) {
 export async function reopenTicket(ticketId, agentId, reason = '') {
   const res = await fetch(`${API}/api/tickets/${ticketId}/reopen`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ agent_id: agentId, reason }),
   });
   if (!res.ok) {

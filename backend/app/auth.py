@@ -128,6 +128,7 @@ def get_current_agent(
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.is_active == True).first()
         if not agent:
             raise HTTPException(status_code=401, detail="Agent account not found or deactivated.")
+        agent._from_jwt = True
         return agent
 
     if not REQUIRE_AUTH:

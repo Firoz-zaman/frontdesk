@@ -303,6 +303,9 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
     );
   }
 
+  const isAssigned = !!ticket.assigned_agent_id;
+  const isOwnerOrLead = !isAssigned || ticket.assigned_agent_id === currentAgent?.id || currentAgent?.role === 'lead' || currentAgent?.role === 'admin';
+
   return (
     <div className="ticket-detail">
       <div className="detail-header">
@@ -317,6 +320,13 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
           <span>📅 {new Date(ticket.created_at).toLocaleString()}</span>
         </div>
       </div>
+
+      {/* Ownership authorization banner */}
+      {isAssigned && !isOwnerOrLead && (
+        <div className="ownership-warning">
+          🔒 Assigned to <strong>{ticket.assigned_agent_name}</strong>. Only the assigned agent or a team lead can change priority, resolve, or reply.
+        </div>
+      )}
 
       {/* Module 4: SLA Panel (INC-0327) */}
       {ticket.sla_status && (
@@ -363,8 +373,9 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
             <select
               value={ticket.priority}
               onChange={e => handlePriorityChange(e.target.value)}
-              disabled={updatingPriority || !currentAgent}
+              disabled={updatingPriority || !currentAgent || !isOwnerOrLead}
               className="priority-select"
+              title={!isOwnerOrLead ? "Only the assigned agent or lead can change priority" : ""}
             >
               <option value="urgent">🔴 Urgent</option>
               <option value="medium">🟡 Medium</option>
@@ -375,7 +386,8 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
           <button
             className="btn-resolve"
             onClick={handleResolve}
-            disabled={resolvingTicket || !currentAgent || !ticket.assigned_agent_id}
+            disabled={resolvingTicket || !currentAgent || !ticket.assigned_agent_id || !isOwnerOrLead}
+            title={!isOwnerOrLead ? "Only the assigned agent or lead can resolve this ticket" : ""}
           >
             {resolvingTicket ? 'Resolving…' : '✅ Mark as Resolved'}
           </button>
@@ -390,7 +402,7 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
           <button
             className="btn-reopen"
             onClick={handleReopen}
-            disabled={reopeningTicket || !currentAgent}
+            disabled={reopeningTicket || !currentAgent || !isOwnerOrLead}
           >
             {reopeningTicket ? 'Reopening…' : '🔄 Reopen Ticket'}
           </button>
