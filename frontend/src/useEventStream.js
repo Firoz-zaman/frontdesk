@@ -64,9 +64,11 @@ export function useEventStream(onEvent, activeToken) {
 
       es.onopen = () => {
         retryDelay = 2000; // Reset backoff on successful handshake
+        onEventRef.current('CONNECTED', { message: 'SSE stream established' });
       };
 
       es.onerror = () => {
+        onEventRef.current('DISCONNECTED', {});
         if (es) {
           es.close();
         }

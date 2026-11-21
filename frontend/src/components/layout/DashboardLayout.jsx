@@ -46,6 +46,10 @@ export function DashboardLayout() {
         setLiveConnected(true);
         return;
       }
+      if (eventType === 'DISCONNECTED') {
+        setLiveConnected(false);
+        return;
+      }
       if (
         [
           'TICKET_CLAIMED',

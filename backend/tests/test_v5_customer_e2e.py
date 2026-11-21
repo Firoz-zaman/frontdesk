@@ -242,6 +242,28 @@ class TestV5CustomerE2E(unittest.TestCase):
         self.assertEqual(res.status_code, 403)
         self.assertIn("Customer", res.json().get("detail", ""))
 
+    def test_cust_08_customer_sse_stream_connection(self):
+        """CUST-08: Customer JWT token connects to /api/events/stream and receives CONNECTED event."""
+        s = requests.Session()
+        res = s.get(
+            f"{BASE_URL}/api/events/stream?token={self.customer_token}",
+            stream=True,
+            timeout=5,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("text/event-stream", res.headers.get("content-type", ""))
+        
+        # Read the first event
+        event_type = None
+        for line in res.iter_lines():
+            if line:
+                decoded = line.decode("utf-8")
+                if decoded.startswith("event:"):
+                    event_type = decoded.split("event:")[1].strip()
+                    break
+        self.assertEqual(event_type, "CONNECTED")
+        res.close()
+
 
 if __name__ == "__main__":
     unittest.main()

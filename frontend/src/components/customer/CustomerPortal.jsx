@@ -69,6 +69,10 @@ export function CustomerPortal() {
         setLiveConnected(true);
         return;
       }
+      if (type === 'DISCONNECTED') {
+        setLiveConnected(false);
+        return;
+      }
       // When agent replies, status changes, or ticket resolved
       loadTickets();
       if (selectedId && data.ticket_id === selectedId) {
