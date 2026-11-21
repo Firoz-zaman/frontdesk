@@ -60,7 +60,7 @@ export function DashboardLayout() {
     [loadTickets, selectedId]
   );
 
-  useEventStream(handleEvent);
+  useEventStream(handleEvent, token);
 
   // Handle atomic claim
   const handleClaim = async (ticketId) => {

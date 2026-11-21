@@ -2,55 +2,87 @@
  * useEventStream — React hook for Server-Sent Events (SSE) real-time push.
  *
  * Usage:
- *   useEventStream((eventType, data) => { ... });
+ *   useEventStream(handleEvent, token);
  *
- * Connects to /api/events/stream with the stored JWT token (if present).
- * Reconnects automatically on disconnect (browser's native EventSource behaviour).
- * The hook cleans up the EventSource on component unmount.
+ * Features:
+ *   - Re-establishes connection on token / identity change.
+ *   - Graceful exponential backoff on disconnects (2s to 30s max).
+ *   - Clean teardown on unmount or session invalidation.
  */
 import { useEffect, useRef } from 'react';
 
-export function useEventStream(onEvent) {
+export function useEventStream(onEvent, activeToken) {
   const onEventRef = useRef(onEvent);
-  // Always keep ref current so the closure inside useEffect doesn't stale
-  useEffect(() => { onEventRef.current = onEvent; }, [onEvent]);
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  }, [onEvent]);
+
+  // Use provided token or fallback to localStorage
+  const currentToken = activeToken !== undefined ? activeToken : localStorage.getItem('frontdesk_token');
 
   useEffect(() => {
-    const token = localStorage.getItem('frontdesk_token');
-    // Pass token as query param — EventSource does not support custom headers
-    const url = token
-      ? `/api/events/stream?token=${encodeURIComponent(token)}`
-      : '/api/events/stream';
+    let es = null;
+    let retryTimeout = null;
+    let retryDelay = 2000;
+    let isCancelled = false;
 
-    const es = new EventSource(url);
+    function connect() {
+      if (isCancelled) return;
+      const token = currentToken || localStorage.getItem('frontdesk_token');
+      const url = token
+        ? `/api/events/stream?token=${encodeURIComponent(token)}`
+        : '/api/events/stream';
 
-    const handleEvent = (type) => (e) => {
       try {
-        const data = JSON.parse(e.data);
-        onEventRef.current(type, data);
-      } catch {
-        // Malformed event — ignore
+        es = new EventSource(url);
+      } catch (err) {
+        console.warn('Failed to initialize EventSource:', err);
+        return;
       }
-    };
 
-    // Subscribe to all event types defined in the SSE spec
-    const EVENT_TYPES = [
-      'CONNECTED',
-      'TICKET_CLAIMED',
-      'PUBLIC_REPLY_SENT',
-      'CUSTOMER_REPLY_RECEIVED',
-      'TICKET_RESOLVED',
-      'SLA_BREACH_WARNING',
-    ];
+      const handleEvent = (type) => (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          onEventRef.current(type, data);
+        } catch {
+          // Malformed JSON event — ignore
+        }
+      };
 
-    EVENT_TYPES.forEach((type) => es.addEventListener(type, handleEvent(type)));
+      const EVENT_TYPES = [
+        'CONNECTED',
+        'TICKET_CLAIMED',
+        'PUBLIC_REPLY_SENT',
+        'CUSTOMER_REPLY_RECEIVED',
+        'TICKET_RESOLVED',
+        'SLA_BREACH_WARNING',
+      ];
 
-    es.onerror = () => {
-      // EventSource handles reconnection automatically; no action needed here
-    };
+      EVENT_TYPES.forEach((type) => es.addEventListener(type, handleEvent(type)));
+
+      es.onopen = () => {
+        retryDelay = 2000; // Reset backoff on successful handshake
+      };
+
+      es.onerror = () => {
+        if (es) {
+          es.close();
+        }
+        if (!isCancelled) {
+          retryTimeout = setTimeout(() => {
+            connect();
+          }, retryDelay);
+          retryDelay = Math.min(retryDelay * 1.5, 30000);
+        }
+      };
+    }
+
+    connect();
 
     return () => {
-      es.close();
+      isCancelled = true;
+      if (retryTimeout) clearTimeout(retryTimeout);
+      if (es) es.close();
     };
-  }, []); // Run once on mount; ref keeps onEvent current
+  }, [currentToken]);
 }
