@@ -10,8 +10,12 @@ Arvo Systems Requirements:
 - Mid-lifecycle escalation: Recalculates clock dynamically from escalation point.
 - Non-repudiation audit logging for escalation and resolution.
 """
+import sys
+import os
 from datetime import datetime, date, timezone, timedelta
 import requests
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.sla import (
     add_business_minutes,

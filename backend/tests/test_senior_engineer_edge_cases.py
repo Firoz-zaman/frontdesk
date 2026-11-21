@@ -10,10 +10,14 @@ Deep boundary and stress testing across all modules:
 7. Auto-Close Working-Hours vs Calendar-Days Inactivity Thresholds (2699 min vs 2700 min).
 8. Audit Trail Immutability and Ordering.
 """
+import sys
+import os
 import concurrent.futures
 from datetime import datetime, timezone, timedelta, date
 import requests
 import sqlite3
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.sla import (
     add_business_minutes,

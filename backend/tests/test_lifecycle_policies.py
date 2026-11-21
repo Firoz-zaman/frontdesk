@@ -11,9 +11,13 @@ Policies verified:
     automatically transition to 'closed'.
   - System logs AUTO_CLOSED audit event.
 """
+import sys
+import os
 from datetime import datetime, timezone, timedelta
 import requests
 import sqlite3
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.lifecycle import can_reopen_ticket, should_auto_close
 
