@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../hooks/useAuth.js';
-import { Button, Input } from '../common/index.js';
+import { Button, Input, ThemeToggle } from '../common/index.js';
 
 const DEMO_CUSTOMERS = [
   {
@@ -134,6 +134,9 @@ export function LoginPage() {
 
       {/* Right Column: Sign-In Card & Quick Switcher */}
       <div className="v3-auth-content">
+        <div style={{ position: 'absolute', top: '16px', right: '16px' }}>
+          <ThemeToggle className="theme-toggle-auth" />
+        </div>
         <div className="v3-auth-card">
           <div className="v3-auth-header">
             <h2 className="v3-auth-title">Agent Workspace</h2>

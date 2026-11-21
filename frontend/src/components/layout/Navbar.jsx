@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../../hooks/useAuth.js';
-import { StatusPill, Button } from '../common/index.js';
+import { StatusPill, Button, ThemeToggle } from '../common/index.js';
 
 export function Navbar({ liveConnected = false }) {
   const { user, logout } = useAuth();
@@ -20,6 +20,7 @@ export function Navbar({ liveConnected = false }) {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <ThemeToggle />
         {user && (
           <div className="v3-nav-user">
             <div className="v3-nav-avatar">

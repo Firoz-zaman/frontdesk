@@ -7,7 +7,7 @@ import {
   fetchCustomerMessages,
   postCustomerMessage,
 } from '../../api.js';
-import { Button, Badge, StatusPill, EmptyState } from '../common/index.js';
+import { Button, Badge, StatusPill, EmptyState, ThemeToggle } from '../common/index.js';
 import { CustomerNewTicketModal } from './CustomerNewTicketModal.jsx';
 
 export function CustomerPortal() {
@@ -139,6 +139,7 @@ export function CustomerPortal() {
             <span>{liveConnected ? 'Live Connection Active' : 'Connecting…'}</span>
           </div>
 
+          <ThemeToggle />
           <div className="customer-user-chip">
             <div className="customer-avatar">{user?.name ? user.name.charAt(0) : 'C'}</div>
             <div className="customer-user-meta">
