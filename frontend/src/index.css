@@ -374,6 +374,74 @@ body {
   line-height: 1.5;
 }
 
+/* ── Customer Reply Simulation Banner ── */
+.v3-customer-simulator-banner {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.simulator-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.simulator-banner-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.simulator-banner-title {
+  font-size: 13px;
+  color: #166534;
+  font-weight: 500;
+}
+
+.simulator-banner-title strong {
+  color: #14532d;
+}
+
+.simulator-banner-desc {
+  font-size: 12px;
+  color: #15803d;
+  margin-top: 2px;
+}
+
+.simulator-action-btn {
+  background: #16a34a;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease-in-out;
+  white-space: nowrap;
+}
+
+.simulator-action-btn:hover:not(:disabled) {
+  background: #15803d;
+  box-shadow: 0 2px 4px rgba(22, 163, 74, 0.25);
+  transform: translateY(-1px);
+}
+
+.simulator-action-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 /* ── Composer ── */
 .composer-container {
   border: 1px solid var(--border);

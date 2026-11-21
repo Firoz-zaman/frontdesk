@@ -29,6 +29,7 @@ export function TicketDetail({
   const [updatingPriority, setUpdatingPriority] = useState(false);
   const [resolvingTicket, setResolvingTicket] = useState(false);
   const [reopeningTicket, setReopeningTicket] = useState(false);
+  const [simulatingCustomer, setSimulatingCustomer] = useState(false);
 
   // Load ticket messages
   const loadMessages = useCallback(() => {
@@ -134,6 +135,36 @@ export function TicketDetail({
       alert(err.message || 'Failed to send message');
     } finally {
       setSendingMsg(false);
+    }
+  };
+
+  // Simulate incoming customer response (unfreezes SLA & resumes status to in_progress)
+  const handleSimulateCustomerReply = async (customText = null) => {
+    if (!ticket) return;
+    setSimulatingCustomer(true);
+    try {
+      const defaultReplies = [
+        `Thank you for following up! I checked the configuration and the issue is resolved on our end.`,
+        `Here are the additional error screenshots and logs requested. Please let us know the next steps.`,
+        `Confirmed, the fix you provided worked perfectly. Thanks for the quick turnaround!`,
+      ];
+      const content = customText || defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
+
+      await postMessage(ticket.id, {
+        content,
+        is_private: false,
+        sender_type: 'customer',
+        sender_id: `cust_${ticket.id.toLowerCase()}`,
+        sender_name: ticket.customer_name || 'Customer',
+      });
+
+      if (onTicketUpdated) onTicketUpdated();
+      loadMessages();
+      loadAudit();
+    } catch (err) {
+      alert(err.message || 'Failed to simulate customer reply');
+    } finally {
+      setSimulatingCustomer(false);
     }
   };
 
@@ -332,6 +363,32 @@ export function TicketDetail({
               </div>
             ))}
           </div>
+
+          {/* Customer Simulator Banner: Visible when ticket is waiting on customer */}
+          {ticket.status === 'waiting_on_customer' && (
+            <div className="v3-customer-simulator-banner">
+              <div className="simulator-banner-content">
+                <div className="simulator-banner-icon">⏳</div>
+                <div>
+                  <div className="simulator-banner-title">
+                    Ticket is <strong>Waiting on Customer</strong> (SLA Timer Paused)
+                  </div>
+                  <div className="simulator-banner-desc">
+                    In production, this resumes when <strong>{ticket.customer_name}</strong> responds via email webhook or magic link portal.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="simulator-action-btn"
+                onClick={() => handleSimulateCustomerReply()}
+                disabled={simulatingCustomer}
+                title="Simulate incoming customer message to unfreeze SLA and resume ticket"
+              >
+                {simulatingCustomer ? 'Simulating…' : `⚡ Simulate ${ticket.customer_name} Reply`}
+              </button>
+            </div>
+          )}
 
           {/* Dual-Mode Composer */}
           <div className="composer-container">
