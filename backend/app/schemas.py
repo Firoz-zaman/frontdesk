@@ -46,3 +46,38 @@ class TicketOut(BaseModel):
 
 class ClaimRequest(BaseModel):
     agent_id: str
+
+
+# ── Messages (Module 2 - INC-0304) ──
+
+class MessageCreate(BaseModel):
+    content: str
+    is_private: bool = False
+    sender_type: str = "agent"  # agent | customer
+    sender_id: Optional[str] = None
+    sender_name: Optional[str] = None
+
+
+class MessageOut(BaseModel):
+    id: str
+    ticket_id: str
+    sender_type: str
+    sender_id: Optional[str] = None
+    sender_name: str
+    content: str
+    is_private: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CustomerMessageOut(BaseModel):
+    """Customer-safe DTO: Strictly omits is_private flag and internal metadata."""
+    id: str
+    ticket_id: str
+    sender_type: str
+    sender_name: str
+    content: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

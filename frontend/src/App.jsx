@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket } from './api.js';
+import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket, fetchMessages, postMessage } from './api.js';
 
 const FILTERS = [
   { label: 'All', value: '' },
@@ -101,7 +101,54 @@ function TicketCard({ ticket, selected, onClick }) {
 }
 
 // ── Ticket Detail (Right Pane) ──
-function TicketDetail({ ticket, onClaim, claiming, currentAgent }) {
+function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated }) {
+  const [messages, setMessages] = useState([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [msgMode, setMsgMode] = useState('public'); // 'public' | 'private'
+  const [msgContent, setMsgContent] = useState('');
+  const [sendingMsg, setSendingMsg] = useState(false);
+
+  // Load ticket messages whenever active ticket changes
+  const loadMessages = useCallback(() => {
+    if (!ticket) return;
+    setLoadingMessages(true);
+    fetchMessages(ticket.id, 'agent')
+      .then(setMessages)
+      .catch(console.error)
+      .finally(() => setLoadingMessages(false));
+  }, [ticket?.id]);
+
+  useEffect(() => {
+    loadMessages();
+  }, [loadMessages]);
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!msgContent.trim() || !ticket) return;
+    if (!currentAgent) {
+      alert('Please select an agent profile in the top bar before sending messages.');
+      return;
+    }
+
+    setSendingMsg(true);
+    try {
+      await postMessage(ticket.id, {
+        content: msgContent.trim(),
+        is_private: msgMode === 'private',
+        sender_type: 'agent',
+        sender_id: currentAgent.id,
+        sender_name: currentAgent.name,
+      });
+      setMsgContent('');
+      loadMessages();
+      if (onTicketUpdated) onTicketUpdated();
+    } catch (err) {
+      alert(err.message || 'Failed to send message');
+    } finally {
+      setSendingMsg(false);
+    }
+  };
+
   if (!ticket) {
     return (
       <div className="ticket-detail">
@@ -147,11 +194,13 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent }) {
         </div>
       )}
 
+      {/* Ticket Description */}
       <div className="detail-section">
         <h3>Description</h3>
         <p>{ticket.description || 'No description provided.'}</p>
       </div>
 
+      {/* Customer Information */}
       <div className="detail-section">
         <h3>Customer Information</h3>
         <div className="customer-info">
@@ -163,6 +212,96 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent }) {
             <label>Email</label>
             <span>{ticket.customer_email}</span>
           </div>
+        </div>
+      </div>
+
+      {/* Module 2: Conversation & Dual-Mode Messaging (INC-0304) */}
+      <div className="detail-section conversation-section">
+        <h3>Conversation & Notes ({messages.length})</h3>
+
+        {/* Message Timeline */}
+        <div className="timeline-container">
+          {loadingMessages && <div className="timeline-loading">Loading conversation…</div>}
+          {!loadingMessages && messages.length === 0 && (
+            <div className="timeline-empty">No replies or notes recorded yet.</div>
+          )}
+          {messages.map((m) => (
+            <div
+              key={m.id}
+              className={`message-card ${m.is_private ? 'message-card-private' : 'message-card-public'}`}
+            >
+              <div className="message-header">
+                <div className="message-sender">
+                  <strong>{m.sender_name}</strong>
+                  <span className="sender-type-tag">({m.sender_type})</span>
+                  {m.is_private && (
+                    <span className="private-note-badge">
+                      🔒 PRIVATE TEAM NOTE — INTERNAL ONLY
+                    </span>
+                  )}
+                </div>
+                <span className="message-time">{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+              <div className="message-content">{m.content}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Dual-Mode Message Composer */}
+        <div className="composer-container">
+          <div className="composer-mode-bar">
+            <button
+              type="button"
+              className={`composer-mode-btn ${msgMode === 'public' ? 'mode-public-active' : ''}`}
+              onClick={() => setMsgMode('public')}
+            >
+              💬 Reply to Customer
+            </button>
+            <button
+              type="button"
+              className={`composer-mode-btn ${msgMode === 'private' ? 'mode-private-active' : ''}`}
+              onClick={() => setMsgMode('private')}
+            >
+              🔒 Private Team Note (Internal)
+            </button>
+          </div>
+
+          <form onSubmit={handleSendMessage} className={`composer-form ${msgMode === 'private' ? 'form-private-theme' : 'form-public-theme'}`}>
+            {msgMode === 'private' && (
+              <div className="composer-warning-banner">
+                🔒 <strong>Internal Team Note:</strong> This note will NEVER be visible to the customer on any screen or API response.
+              </div>
+            )}
+            {msgMode === 'public' && (
+              <div className="composer-info-banner">
+                💬 <strong>Customer Reply:</strong> This will be sent directly to <strong>{ticket.customer_name}</strong> and advances ticket status to <em>Waiting on Customer</em>.
+              </div>
+            )}
+            <textarea
+              required
+              rows={3}
+              placeholder={
+                msgMode === 'private'
+                  ? 'Write an internal note for team members (visible only to agents)...'
+                  : `Draft your response to ${ticket.customer_name}...`
+              }
+              value={msgContent}
+              onChange={(e) => setMsgContent(e.target.value)}
+            />
+            <div className="composer-actions">
+              <button
+                type="submit"
+                disabled={sendingMsg || !msgContent.trim()}
+                className={`btn-send ${msgMode === 'private' ? 'btn-send-private' : 'btn-send-public'}`}
+              >
+                {sendingMsg
+                  ? 'Saving…'
+                  : msgMode === 'private'
+                  ? '🔒 Save Internal Note'
+                  : '💬 Send Customer Reply'}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
@@ -291,6 +430,10 @@ export default function App() {
           onClaim={handleClaim}
           claiming={claiming}
           currentAgent={currentAgent}
+          onTicketUpdated={() => {
+            loadTickets();
+            if (selectedId) fetchTicket(selectedId).then(setSelectedTicket);
+          }}
         />
       </div>
 

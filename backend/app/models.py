@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Boolean
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -44,3 +44,20 @@ class Ticket(Base):
 
     # Relationship
     assigned_agent = relationship("Agent", back_populates="assigned_tickets")
+    messages = relationship("Message", back_populates="ticket", order_by="Message.created_at", cascade="all, delete-orphan")
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    ticket_id = Column(String(20), ForeignKey("tickets.id"), nullable=False)
+    sender_type = Column(String(20), nullable=False, default="agent")  # agent | customer | system
+    sender_id = Column(String(100), nullable=True)  # Agent UUID or customer email
+    sender_name = Column(String(100), nullable=False)
+    content = Column(Text, nullable=False)
+    is_private = Column(Boolean, nullable=False, default=False)  # INC-0304: True = Internal Team Note
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    ticket = relationship("Ticket", back_populates="messages")
+

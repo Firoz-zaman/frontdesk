@@ -10,95 +10,125 @@
 
 Arvo Systems operates with nine support agents handling approximately 40 customer tickets daily. The previous shared spreadsheet and WhatsApp workflow broke down due to lack of concurrency control, data leakage, and untracked response times.
 
-### Incident INC-0291 (14 October) — Problem Addressed in Step 1
+---
+
+## 2. Step 1: Pluggable Module 1 — Atomic Ticket Claiming (`INC-0291`)
+
+### Incident INC-0291 (14 October) — Problem Addressed
 * **Incident Summary**: Two support agents simultaneously opened the same customer ticket, clicked "take this ticket", and replied within one minute of each other with conflicting advice.
 * **Root Cause**: The shared spreadsheet allowed simultaneous modifications with no mutual exclusion or atomic locking.
-* **Objective for Step 1**: Build a pluggable, race-condition-proof atomic claiming mechanism so only one agent can claim a ticket. If another agent attempts to claim it concurrently, the system must immediately reject the second request with an `HTTP 409 Conflict` and display the winning assignee.
+* **Objective for Step 1**: Build a pluggable, race-condition-proof atomic claiming mechanism so only one agent can claim a ticket. If another agent attempts to claim it concurrently, the system immediately rejects the second request with `HTTP 409 Conflict` and displays the winning assignee.
+
+### Implementation Pieces:
+1. **Backend DTO & Concurrency Endpoint** (`backend/app/schemas.py`, `backend/app/main.py`):
+   - `ClaimRequest` Pydantic model (`agent_id: str`).
+   - Atomic conditional update:
+     ```python
+     result = db.execute(
+         update(Ticket)
+         .where(Ticket.id == ticket_id, Ticket.assigned_agent_id.is_(None))
+         .values(assigned_agent_id=payload.agent_id, status="in_progress")
+     )
+     ```
+   - If `result.rowcount == 0`, rolls back and returns `HTTP 409 Conflict` with the winning agent's name.
+2. **Frontend UI & Real-Time Conflict Handling** (`frontend/src/api.js`, `frontend/src/App.jsx`, `frontend/src/index.css`):
+   - Claim action banner: `[ ✋ Take this ticket as {CurrentAgent} ]`.
+   - On 409 Conflict: Informative alert and immediate state re-sync.
+3. **Automated Concurrency Test Suite** (`backend/tests/test_atomic_claim.py`):
+   - Concurrent worker threads verified that status codes are strictly `[200, 409]`. All 4 tests passed.
 
 ---
 
-## 2. Step 1: Implementation Breakdown
+## 3. Step 2: Pluggable Module 2 — Dual-Mode Messaging & Note Isolation (`INC-0304`)
 
-To ensure zero bloat, high resilience, and clean separation of concerns, Step 1 was divided into 4 discrete implementation pieces:
+### Incident INC-0304 (22 October) — Problem Addressed
+* **Incident Summary**: An agent wrote a private internal note explaining how to handle a difficult customer. By mistake, the note was sent to that customer. Arvo almost lost the customer.
+* **Exact Specification Requirement**:
+  > *"Private team notes must never be shown to a customer. Not on a screen. Not in an API response. Not in an export. Not in a list."*
+* **Objective for Step 2**: Implement a zero-leakage dual-mode messaging system where private internal notes and public replies have strict separation at the database, query, serialization, and UI layers.
 
-### Piece 1: Backend DTO & Atomic Concurrency Endpoint
-* **Schema** (`backend/app/schemas.py`):
-  - Defined `ClaimRequest` Pydantic model (`agent_id: str`).
-* **Endpoint** (`backend/app/main.py`):
-  - Added `POST /api/tickets/{ticket_id}/claim`.
-  - Performs validation: validates agent existence (404) and ticket existence (404).
-  - Pre-check: If ticket already has an `assigned_agent_id`, immediately rejects with `HTTP 409 Conflict` naming the current agent.
-  - **Atomic SQL conditional update**:
-    ```python
-    result = db.execute(
-        update(Ticket)
-        .where(Ticket.id == ticket_id, Ticket.assigned_agent_id.is_(None))
-        .values(assigned_agent_id=payload.agent_id, status="in_progress")
-    )
-    ```
-  - **Race Condition Guard**: If `result.rowcount == 0` (meaning a competing transaction claimed the ticket in the millisecond window between the read and update), the transaction rolls back and returns `HTTP 409 Conflict` with the actual assignee.
+### Implementation Pieces:
 
-### Piece 2: Frontend UI & Real-Time Conflict Handling
-* **API Client** (`frontend/src/api.js`):
-  - Added `claimTicket(ticketId, agentId)` with 409 detail parsing.
-* **Workspace View** (`frontend/src/App.jsx`):
-  - When an unassigned ticket is viewed, a clear claim banner is displayed:  
-    `[ ✋ Take this ticket as {CurrentAgent} ]`
-  - When assigned, the banner disappears, and the assignee is prominently shown in the header.
-  - **Conflict Resilience**: If a 409 Conflict occurs (another agent took it first), an alert explains the conflict, and the UI immediately re-fetches the ticket to reflect the latest assignee without crashing.
-* **Styling** (`frontend/src/index.css`):
-  - Added styling for `.claim-banner`, `.claim-banner-text`, and `.btn-claim`.
+#### Piece 1: Database Model & DTO Data Isolation Barrier
+* **Data Model** (`backend/app/models.py`):
+  - Table `messages`:
+    - `id`: UUID (Primary Key)
+    - `ticket_id`: Foreign Key (`tickets.id`)
+    - `sender_type`: ENUM (`agent`, `customer`, `system`)
+    - `sender_id`: VARCHAR (nullable agent ID)
+    - `sender_name`: VARCHAR
+    - `content`: TEXT
+    - `is_private`: BOOLEAN (`True` for team internal notes, `False` for public replies)
+    - `created_at`: TIMESTAMP WITH TIME ZONE
+  - Ticket relationship: `messages = relationship("Message", back_populates="ticket", cascade="all, delete-orphan")`.
+* **Strict DTO Serialization Isolation** (`backend/app/schemas.py`):
+  - `MessageCreate`: Payload for creating messages.
+  - `MessageOut`: Internal agent model containing `is_private` flag and metadata.
+  - `CustomerMessageOut`: **Customer-Safe DTO** that strictly strips `is_private` and internal identifiers from output schemas entirely.
 
-### Piece 3: Automated Concurrency Verification Suite
-* **Test Suite** (`backend/tests/test_atomic_claim.py`):
-  - Created a test simulating 2 concurrent threads firing simultaneously at the exact same millisecond against an unclaimed ticket.
-  - Asserted that status codes are strictly `[200, 409]` (exactly one winner, exactly one conflict).
-  - Verified subsequent claim attempts return `409 Conflict`.
-  - Verified invalid agent returns `404`.
-  - Verified nonexistent ticket returns `404`.
+#### Piece 2: API Endpoints with Database-Level Filtering
+* **Endpoints** (`backend/app/main.py`):
+  - `GET /api/tickets/{ticket_id}/messages`:
+    - Parameter: `scope: str = "agent"` (`agent` | `customer`).
+    - **Customer View Wall**: When `scope="customer"`, the query applies `filter(Message.is_private == False)` at the database level and returns `CustomerMessageOut`. Private notes are never queried, loaded, or serialized.
+    - **Agent View**: Returns all messages with clear `is_private: true` indicators.
+  - `POST /api/tickets/{ticket_id}/messages`:
+    - Accepts `MessageCreate`.
+    - **Sanitization Guard**: If `sender_type == "customer"`, `is_private` is forcefully set to `False` (customers cannot create internal notes).
+    - **Lifecycle Status Transition**:
+      - If an agent sends a public reply to the customer, ticket status moves from `open` or `in_progress` to `waiting_on_customer` (supporting Meera's requirement: waiting time is paused).
+      - If a customer responds, ticket status moves back to `in_progress`.
+      - If an agent adds a private team note, status remains unchanged.
 
-### Piece 4: Build Verification
-* Frontend production build: Bundled in 597ms with 0 warnings/errors.
-* Backend server: Running healthily on port 8000.
-* Vite dev server: Running with reverse proxy on port 5173.
+#### Piece 3: Frontend Dual-Mode Timeline & Composer
+* **Client API** (`frontend/src/api.js`):
+  - Added `fetchMessages(ticketId, scope)` and `postMessage(ticketId, messageData)`.
+* **Workspace Timeline & Composer** (`frontend/src/App.jsx`):
+  - **Visual Distinction for Incident Prevention**:
+    - **Public Customer Replies**: Rendered with clean blue border (`💬 PUBLIC REPLY (Sent to {customer})`).
+    - **Private Team Notes**: Rendered with a high-contrast amber background, lock icon `🔒 PRIVATE TEAM NOTE — INTERNAL ONLY`, and explicit notice that it is never shown to customers.
+  - **Dual-Mode Composer Tabs**:
+    - Mode 1: `💬 Reply to Customer` (Blue theme: "Send Customer Reply"). Displays an info banner reminding the agent this message goes to the customer.
+    - Mode 2: `🔒 Private Team Note (Internal)` (Amber theme: "Save Internal Note"). Displays a security banner assuring the agent this note is internal only.
+* **Styles** (`frontend/src/index.css`):
+  - Added CSS classes for `.conversation-section`, `.message-card-public`, `.message-card-private`, `.private-note-badge`, `.composer-mode-bar`, `.mode-public-active`, and `.mode-private-active`.
+
+#### Piece 4: Automated Verification Test Suite
+* **Test Suite** (`backend/tests/test_note_isolation.py`):
+  - `test_customer_view_strictly_omits_private_notes`: Verifies private note content never appears in customer query responses or raw response text.
+  - `test_customer_cannot_spoof_private_notes`: Verifies customers cannot create private notes.
+  - `test_lifecycle_status_transitions_on_messages`: Verifies ticket moves to `waiting_on_customer` on public agent reply, and returns to `in_progress` on customer reply.
 
 ---
 
-## 3. Files Created / Modified in Step 1
-
-| File | Change Type | Purpose |
-|---|---|---|
-| `backend/app/schemas.py` | Modified | Added `ClaimRequest` Pydantic model |
-| `backend/app/main.py` | Modified | Added atomic conditional update endpoint `POST /api/tickets/{ticket_id}/claim` |
-| `backend/requirements.txt` | Modified | Added `requests>=2.31.0` for automated testing |
-| `frontend/src/api.js` | Modified | Added `claimTicket` API function |
-| `frontend/src/App.jsx` | Modified | Added claim action banner, error alert, and auto-reload logic |
-| `frontend/src/index.css` | Modified | Added styles for claim action banner and buttons |
-| `backend/tests/test_atomic_claim.py` | Created | Concurrency stress test verifying INC-0291 resolution |
-| `CONTEXT.md` | Created | Full technical context and implementation record |
-
----
-
-## 4. Verification Test Results
+## 4. Verification Test Results (Step 1 & Step 2)
 
 ```
 === Running Atomic Ticket Claiming Verification Tests ===
-
-[TEST 1] Created fresh ticket: INC-0007
+[TEST 1] Created fresh ticket: INC-0013
 [TEST 1] Response status codes: 409 and 200
-[TEST 1] Conflict message: {'detail': 'Ticket has already been claimed by Ravi.'}
-[TEST 1] PASS: Ticket INC-0007 safely assigned to Ravi with status 'in_progress'
-[TEST 2] PASS: Subsequent claim rejected with 409: Ticket has already been claimed by Meera.
+[TEST 1] PASS: Ticket INC-0013 safely assigned to Ravi with status 'in_progress'
+[TEST 2] PASS: Subsequent claim rejected with 409
 [TEST 3] PASS: Invalid agent returned 404
 [TEST 4] PASS: Nonexistent ticket returned 404
-
 ALL ATOMIC CLAIMING TESTS PASSED SUCCESSFULLY! (INC-0291 Solved)
+
+=== Running Note Isolation & Security Tests (INC-0304) ===
+[TEST 1] Testing with Ticket: INC-0010
+[TEST 1] Customer scope returned 1 messages
+[TEST 1] PASS: Zero leakage in customer API response! Private note strictly omitted.
+[TEST 1] Agent scope returned 2 messages
+[TEST 1] PASS: Agent correctly sees both internal notes and public replies.
+[TEST 2] PASS: Customer cannot force is_private=True (sanitized to False).
+[TEST 3] PASS: Status moved to 'waiting_on_customer' after public agent reply.
+[TEST 3] PASS: Status returned to 'in_progress' when customer responded.
+ALL NOTE ISOLATION TESTS PASSED SUCCESSFULLY! (INC-0304 Solved)
 ```
 
 ---
 
 ## 5. Next Planned Step
 
-* **Step 2**: Pluggable Module 2 — Dual-Mode Messaging & Note Isolation (`INC-0304`).
-  - Separation of public customer replies vs private internal team notes.
-  - Strict DTO filtering to prevent private notes from ever reaching customer screens, APIs, or exports.
+* **Step 3**: Pluggable Module 3 — Immutable Audit Event Sourcing (`INC-0318`).
+  - Append-only event history logging every action (creation, claim, replies, notes, status changes).
+  - Proof and non-repudiation recording who did what and when.

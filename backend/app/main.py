@@ -8,8 +8,16 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from .database import engine, get_db, Base
-from .models import Agent, Ticket
-from .schemas import AgentOut, TicketCreate, TicketOut, ClaimRequest
+from .models import Agent, Ticket, Message
+from .schemas import (
+    AgentOut,
+    TicketCreate,
+    TicketOut,
+    ClaimRequest,
+    MessageCreate,
+    MessageOut,
+    CustomerMessageOut,
+)
 from .seed import seed_database
 from .utils import next_ticket_id
 
@@ -145,4 +153,100 @@ def claim_ticket(ticket_id: str, payload: ClaimRequest, db: Session = Depends(ge
     db.commit()
     db.refresh(ticket)
     return _ticket_to_out(ticket)
+
+
+# ── Module 2: Dual-Mode Messaging & Note Isolation (INC-0304) ──
+
+@app.get("/api/tickets/{ticket_id}/messages")
+def list_ticket_messages(
+    ticket_id: str,
+    scope: str = Query("agent", description="'agent' includes private notes; 'customer' strictly isolates them"),
+    db: Session = Depends(get_db),
+):
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    query = db.query(Message).filter(Message.ticket_id == ticket_id)
+
+    # INC-0304: Zero-leakage wall for customer view
+    if scope == "customer":
+        # Strictly exclude any message marked as private at the DB query level
+        messages = query.filter(Message.is_private == False).order_by(Message.created_at.asc()).all()
+        return [
+            CustomerMessageOut(
+                id=m.id,
+                ticket_id=m.ticket_id,
+                sender_type=m.sender_type,
+                sender_name=m.sender_name,
+                content=m.content,
+                created_at=m.created_at,
+            )
+            for m in messages
+        ]
+
+    # Agent view: includes all messages and indicates is_private
+    messages = query.order_by(Message.created_at.asc()).all()
+    return [
+        MessageOut(
+            id=m.id,
+            ticket_id=m.ticket_id,
+            sender_type=m.sender_type,
+            sender_id=m.sender_id,
+            sender_name=m.sender_name,
+            content=m.content,
+            is_private=m.is_private,
+            created_at=m.created_at,
+        )
+        for m in messages
+    ]
+
+
+@app.post("/api/tickets/{ticket_id}/messages", response_model=MessageOut, status_code=201)
+def post_ticket_message(
+    ticket_id: str,
+    payload: MessageCreate,
+    db: Session = Depends(get_db),
+):
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    sender_name = payload.sender_name
+    sender_type = payload.sender_type
+    is_private = payload.is_private
+
+    if sender_type == "customer":
+        # Customers can NEVER post private internal notes
+        is_private = False
+        sender_name = sender_name or ticket.customer_name
+    elif sender_type == "agent":
+        if payload.sender_id and not sender_name:
+            agent = db.query(Agent).filter(Agent.id == payload.sender_id).first()
+            if agent:
+                sender_name = agent.name
+        sender_name = sender_name or "Support Agent"
+
+    message = Message(
+        ticket_id=ticket_id,
+        sender_type=sender_type,
+        sender_id=payload.sender_id,
+        sender_name=sender_name,
+        content=payload.content,
+        is_private=is_private,
+    )
+    db.add(message)
+
+    # State transition: If agent replies publicly to customer, status moves to 'waiting_on_customer'
+    if sender_type == "agent" and not is_private and ticket.status in ("open", "in_progress"):
+        ticket.status = "waiting_on_customer"
+
+    # State transition: If customer replies back, ticket status moves back to 'in_progress'
+    elif sender_type == "customer" and ticket.status == "waiting_on_customer":
+        ticket.status = "in_progress"
+
+    db.commit()
+    db.refresh(message)
+    return MessageOut.model_validate(message)
+
 

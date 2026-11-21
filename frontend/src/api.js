@@ -45,3 +45,20 @@ export async function claimTicket(ticketId, agentId) {
   return res.json();
 }
 
+export async function fetchMessages(ticketId, scope = 'agent') {
+  const res = await fetch(`${API}/api/tickets/${ticketId}/messages?scope=${scope}`);
+  if (!res.ok) throw new Error('Failed to fetch messages');
+  return res.json();
+}
+
+export async function postMessage(ticketId, messageData) {
+  const res = await fetch(`${API}/api/tickets/${ticketId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(messageData),
+  });
+  if (!res.ok) throw new Error('Failed to post message');
+  return res.json();
+}
+
+
