@@ -131,9 +131,13 @@ def get_ticket(ticket_id: str, db: Session = Depends(get_db)):
 
 @app.post("/api/tickets", response_model=TicketOut, status_code=201)
 def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)):
+    p = payload.priority.lower()
+    if p not in ("urgent", "medium", "small"):
+        raise HTTPException(status_code=400, detail="Invalid priority level. Must be urgent, medium, or small.")
+
     ticket_id = next_ticket_id(db)
     now = datetime.now(timezone.utc)
-    first_resp_due, res_due = compute_ticket_slas(now, payload.priority)
+    first_resp_due, res_due = compute_ticket_slas(now, p)
 
     ticket = Ticket(
         id=ticket_id,
@@ -141,7 +145,7 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)):
         description=payload.description,
         customer_name=payload.customer_name,
         customer_email=payload.customer_email,
-        priority=payload.priority,
+        priority=p,
         created_at=now,
         first_response_due_at=first_resp_due,
         resolution_due_at=res_due,
@@ -181,7 +185,14 @@ def claim_ticket(ticket_id: str, payload: ClaimRequest, db: Session = Depends(ge
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
-    # 3. Check if already claimed prior to execution
+    # 3. Check terminal state
+    if ticket.status in ("done", "closed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot claim a resolved or closed ticket. Reopen the ticket first."
+        )
+
+    # 4. Check if already claimed prior to execution
     if ticket.assigned_agent_id is not None:
         assigned_name = ticket.assigned_agent.name if ticket.assigned_agent else "another agent"
         raise HTTPException(
@@ -283,6 +294,9 @@ def post_ticket_message(
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
+    if not payload.content or not payload.content.strip():
+        raise HTTPException(status_code=400, detail="Message content cannot be empty.")
+
     sender_name = payload.sender_name
     sender_type = payload.sender_type
     is_private = payload.is_private
@@ -291,6 +305,16 @@ def post_ticket_message(
         # Customers can NEVER post private internal notes
         is_private = False
         sender_name = sender_name or ticket.customer_name
+
+        # If customer sends message on resolved/closed ticket, verify reopen policy
+        if ticket.status in ("done", "closed"):
+            allowed, reason = can_reopen_ticket(ticket)
+            if not allowed:
+                raise HTTPException(status_code=400, detail=reason)
+            # Reopen ticket to in_progress upon valid customer reply
+            ticket.status = "in_progress"
+            ticket.resolved_at = None
+            ticket.closed_at = None
     elif sender_type == "agent":
         if payload.sender_id and not sender_name:
             agent = db.query(Agent).filter(Agent.id == payload.sender_id).first()
@@ -394,6 +418,9 @@ def update_ticket_priority(
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
+    if ticket.status in ("done", "closed"):
+        raise HTTPException(status_code=400, detail="Cannot change priority of a resolved or closed ticket.")
+
     new_p = payload.priority.lower()
     if new_p not in ("urgent", "medium", "small"):
         raise HTTPException(status_code=400, detail="Invalid priority level. Must be urgent, medium, or small.")
@@ -453,6 +480,9 @@ def resolve_ticket(
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if ticket.status in ("done", "closed"):
+        raise HTTPException(status_code=400, detail="Ticket is already resolved or closed.")
 
     now = datetime.now(timezone.utc)
     ticket.status = "done"

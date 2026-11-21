@@ -352,11 +352,80 @@ ALL STAGE 5 LIFECYCLE POLICY TESTS PASSED SUCCESSFULLY!
 
 ---
 
-## 9. Next Planned Step
+## 9. Senior Engineer Deep Edge Case Analysis & Hardening
+
+### Overview
+A comprehensive boundary, concurrency, and security audit was executed across all application layers to uncover latent edge cases, race conditions, and policy bypass vulnerabilities.
+
+### Discovered Edge Cases & Applied Fixes:
+1. **Terminal State Claiming Loophole**:
+   - *Bug*: A ticket that had already been resolved (`done`) or `closed` could be directly claimed by an agent, illegally bypassing the 7-day reopen guard and reverting status to `in_progress`.
+   - *Fix applied*: Added explicit terminal state verification in `claim_ticket`. Attempting to claim a resolved/closed ticket returns `HTTP 400 Bad Request` (*"Cannot claim a resolved or closed ticket. Reopen the ticket first."*).
+2. **Whitespace / Empty Message Injection**:
+   - *Bug*: `post_ticket_message` accepted empty strings or whitespace-only messages.
+   - *Fix applied*: Validates `payload.content.strip()`. Empty or whitespace messages are rejected with `HTTP 400 Bad Request` (*"Message content cannot be empty."*).
+3. **Closed Ticket Customer Messaging Guard**:
+   - *Bug*: A customer could post a message on a ticket closed more than 7 days ago, circumventing the REQ-SLA-05 reopen window guard.
+   - *Fix applied*: Checked `can_reopen_ticket` when a customer message is posted to a terminal ticket. If closed $> 7$ days, rejected with `HTTP 400` (*"Tickets closed more than 1 week ago cannot be reopened. Please submit a new ticket."*). If within 7 days, posting customer message safely transitions the ticket back to `in_progress`.
+4. **Priority Escalation on Resolved Tickets**:
+   - *Bug*: `update_ticket_priority` allowed escalating an already resolved ticket, re-activating recalculation logic on frozen SLAs.
+   - *Fix applied*: Blocked with `HTTP 400` (*"Cannot change priority of a resolved or closed ticket."*).
+5. **Double-Resolution Reset Vulnerability**:
+   - *Bug*: Repeated calls to `/resolve` on an already `done` ticket reset `resolved_at` to the current timestamp, inadvertently resetting the 7-day reopen countdown.
+   - *Fix applied*: Blocked with `HTTP 400` (*"Ticket is already resolved or closed."*), preserving the original timestamp.
+6. **High Concurrency Contention (N=5 simultaneous agents)**:
+   - Verified with 5 simultaneous threads competing for a single ticket. Exactly one agent receives `200 OK`, while all other 4 agents receive `409 Conflict`.
+7. **Exact Working-Hours Arithmetic & Weekend Pause**:
+   - Verified that weekend pauses calculate strictly 60 business minutes (not 64 hours).
+   - Verified exact 2,699 business minutes does not trigger auto-close, whereas exact 2,700 business minutes (5 working days) triggers auto-close.
+
+### Edge Case Verification Output:
+```text
+[EDGE 1] High Concurrency Claiming (5 simultaneous agents)...
+  ✓ Status codes from 5 simultaneous workers: [200, 409, 409, 409, 409]
+  ✓ Safely claimed by winner: Meera
+
+[EDGE 2] Claiming Guards on Terminal States...
+  ✓ Claiming resolved/closed ticket rejected with HTTP 400.
+
+[EDGE 3] Messaging Boundary & Security Leak Guards...
+  ✓ Empty / whitespace message rejected with HTTP 400.
+  ✓ Customer scope strictly filters private notes and omits is_private field.
+  ✓ Customer messaging on ticket closed > 7 days rejected with HTTP 400.
+
+[EDGE 4] SLA Exact Boundary Arithmetic...
+  ✓ Exact business start (09:30) addition passed.
+  ✓ Exact business end (18:30) rollover passed.
+  ✓ Paused duration across weekend is exactly 60 business minutes (not 64 hours).
+  ✓ Multi-day holiday span correctly skips Good Friday + Weekend.
+
+[EDGE 5] Priority Escalation Guards...
+  ✓ Invalid priority string rejected with HTTP 400.
+  ✓ Priority escalation on resolved ticket rejected with HTTP 400.
+
+[EDGE 6] Lifecycle Reopening Boundary Conditions (6d23h vs 7d1h)...
+  ✓ Reopen at 6 days 23 hours allowed successfully.
+  ✓ Reopen at 7 days 1 hour rejected with HTTP 400.
+
+[EDGE 7] Auto-Close Inactivity Exact Business Minutes Threshold...
+  ✓ Ticket at 2,699 business minutes does NOT auto-close.
+  ✓ Ticket at exact 2,700 business minutes (5 working days) triggers auto-close.
+
+[EDGE 8] Audit Log Immutability & Monotonicity...
+  ✓ PUT, PATCH, DELETE on audit endpoint return 405 Method Not Allowed.
+  ✓ Audit logs are strictly monotonically ordered by ID and timestamp.
+
+🌟 ALL SENIOR ENGINEER EDGE CASE TESTS COMPLETED!
+```
+
+---
+
+## 10. Next Planned Step
 
 * **Step 6**: Packaging & Deployment.
   - Production containerization & startup script.
   - Comprehensive documentation & user guide.
   - Evaluation summary.
+
 
 
