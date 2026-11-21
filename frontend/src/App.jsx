@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAgents, fetchTickets, fetchTicket, createTicket } from './api.js';
+import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket } from './api.js';
 
 const FILTERS = [
   { label: 'All', value: '' },
@@ -101,7 +101,7 @@ function TicketCard({ ticket, selected, onClick }) {
 }
 
 // ── Ticket Detail (Right Pane) ──
-function TicketDetail({ ticket }) {
+function TicketDetail({ ticket, onClaim, claiming, currentAgent }) {
   if (!ticket) {
     return (
       <div className="ticket-detail">
@@ -124,11 +124,28 @@ function TicketDetail({ ticket }) {
           <span className={statusClass(ticket.status)}>{statusLabel(ticket.status)}</span>
           {ticket.assigned_agent_name
             ? <span>👤 Assigned to: <strong>{ticket.assigned_agent_name}</strong></span>
-            : <span style={{ color: '#dc2626' }}>⚠ Unassigned</span>
+            : <span style={{ color: '#dc2626', fontWeight: 600 }}>⚠ Unassigned</span>
           }
           <span>📅 {new Date(ticket.created_at).toLocaleString()}</span>
         </div>
       </div>
+
+      {/* Module 1: Claim Action Banner (INC-0291) */}
+      {!ticket.assigned_agent_id && (
+        <div className="claim-banner">
+          <div className="claim-banner-text">
+            <strong>Ticket is unassigned</strong>
+            <span>Claim this ticket to start working on it and respond to the customer.</span>
+          </div>
+          <button
+            className="btn-claim"
+            onClick={() => onClaim(ticket.id)}
+            disabled={claiming || !currentAgent}
+          >
+            {claiming ? 'Claiming…' : `✋ Take this ticket${currentAgent ? ` as ${currentAgent.name}` : ''}`}
+          </button>
+        </div>
+      )}
 
       <div className="detail-section">
         <h3>Description</h3>
@@ -161,6 +178,7 @@ export default function App() {
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [filter, setFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [claiming, setClaiming] = useState(false);
 
   // Load agents once
   useEffect(() => {
@@ -187,6 +205,27 @@ export default function App() {
       setSelectedTicket(null);
     }
   }, [selectedId]);
+
+  // Handle claiming ticket atomically (INC-0291)
+  const handleClaim = async (ticketId) => {
+    if (!currentAgent) {
+      alert('Please select an agent profile in the top bar before claiming.');
+      return;
+    }
+    setClaiming(true);
+    try {
+      const updated = await claimTicket(ticketId, currentAgent.id);
+      setSelectedTicket(updated);
+      loadTickets();
+    } catch (err) {
+      alert(err.message);
+      // Immediately reload to show current assignee state
+      fetchTicket(ticketId).then(setSelectedTicket).catch(console.error);
+      loadTickets();
+    } finally {
+      setClaiming(false);
+    }
+  };
 
   return (
     <>
@@ -247,7 +286,12 @@ export default function App() {
         </div>
 
         {/* Right: Ticket Detail */}
-        <TicketDetail ticket={selectedTicket} />
+        <TicketDetail
+          ticket={selectedTicket}
+          onClaim={handleClaim}
+          claiming={claiming}
+          currentAgent={currentAgent}
+        />
       </div>
 
       {/* Create Modal */}

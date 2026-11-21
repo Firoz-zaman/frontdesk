@@ -1,4 +1,4 @@
-"""Pydantic schemas — Step 0 Core Base DTOs."""
+"""Pydantic schemas — Core Base & Module DTOs."""
 from datetime import datetime
 from typing import Optional
 
@@ -40,3 +40,9 @@ class TicketOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Claim (Module 1 - INC-0291) ──
+
+class ClaimRequest(BaseModel):
+    agent_id: str

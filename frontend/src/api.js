@@ -28,3 +28,20 @@ export async function createTicket(data) {
   if (!res.ok) throw new Error('Failed to create ticket');
   return res.json();
 }
+
+export async function claimTicket(ticketId, agentId) {
+  const res = await fetch(`${API}/api/tickets/${ticketId}/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_id: agentId }),
+  });
+  if (res.status === 409) {
+    const errorData = await res.json();
+    throw new Error(errorData.detail || 'Ticket already claimed by another agent');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to claim ticket');
+  }
+  return res.json();
+}
+

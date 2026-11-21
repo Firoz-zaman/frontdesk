@@ -4,11 +4,12 @@ from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from .database import engine, get_db, Base
 from .models import Agent, Ticket
-from .schemas import AgentOut, TicketCreate, TicketOut
+from .schemas import AgentOut, TicketCreate, TicketOut, ClaimRequest
 from .seed import seed_database
 from .utils import next_ticket_id
 
@@ -100,3 +101,48 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(ticket)
     return _ticket_to_out(ticket)
+
+
+# ── Module 1: Atomic Claiming (INC-0291) ──
+
+@app.post("/api/tickets/{ticket_id}/claim", response_model=TicketOut)
+def claim_ticket(ticket_id: str, payload: ClaimRequest, db: Session = Depends(get_db)):
+    # 1. Verify agent exists
+    agent = db.query(Agent).filter(Agent.id == payload.agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # 2. Check ticket existence
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    # 3. Check if already claimed prior to execution
+    if ticket.assigned_agent_id is not None:
+        assigned_name = ticket.assigned_agent.name if ticket.assigned_agent else "another agent"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ticket has already been claimed by {assigned_name}."
+        )
+
+    # 4. Atomic conditional update to eliminate race condition (INC-0291)
+    result = db.execute(
+        update(Ticket)
+        .where(Ticket.id == ticket_id, Ticket.assigned_agent_id.is_(None))
+        .values(assigned_agent_id=payload.agent_id, status="in_progress")
+    )
+
+    if result.rowcount == 0:
+        db.rollback()
+        # Concurrently claimed by another agent
+        current = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+        assigned_name = current.assigned_agent.name if current and current.assigned_agent else "another agent"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ticket was just claimed by {assigned_name} in a concurrent session."
+        )
+
+    db.commit()
+    db.refresh(ticket)
+    return _ticket_to_out(ticket)
+
