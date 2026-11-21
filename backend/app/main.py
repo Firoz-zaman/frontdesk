@@ -1,5 +1,6 @@
 """FastAPI application — Step 0 Core Base."""
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Query
@@ -18,10 +19,19 @@ from .schemas import (
     MessageOut,
     CustomerMessageOut,
     AuditLogOut,
+    PriorityUpdateRequest,
+    ResolveTicketRequest,
 )
 from .seed import seed_database
 from .utils import next_ticket_id
 from .audit import log_audit
+from .sla import (
+    compute_ticket_slas,
+    recalculate_sla_on_priority_change,
+    compute_sla_status,
+    add_business_minutes,
+    calculate_business_minutes_between,
+)
 
 
 @asynccontextmanager
@@ -61,7 +71,8 @@ def list_agents(db: Session = Depends(get_db)):
 # ── Tickets ──
 
 def _ticket_to_out(ticket: Ticket) -> TicketOut:
-    """Convert a Ticket ORM instance to a TicketOut schema."""
+    """Convert a Ticket ORM instance to a TicketOut schema with live SLA health."""
+    sla_info = compute_sla_status(ticket)
     return TicketOut(
         id=ticket.id,
         title=ticket.title,
@@ -73,6 +84,12 @@ def _ticket_to_out(ticket: Ticket) -> TicketOut:
         assigned_agent_id=ticket.assigned_agent_id,
         assigned_agent_name=ticket.assigned_agent.name if ticket.assigned_agent else None,
         created_at=ticket.created_at,
+        first_response_due_at=ticket.first_response_due_at,
+        resolution_due_at=ticket.resolution_due_at,
+        first_responded_at=ticket.first_responded_at,
+        resolved_at=ticket.resolved_at,
+        sla_paused_at=ticket.sla_paused_at,
+        sla_status=sla_info,
     )
 
 
@@ -99,6 +116,9 @@ def get_ticket(ticket_id: str, db: Session = Depends(get_db)):
 @app.post("/api/tickets", response_model=TicketOut, status_code=201)
 def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)):
     ticket_id = next_ticket_id(db)
+    now = datetime.now(timezone.utc)
+    first_resp_due, res_due = compute_ticket_slas(now, payload.priority)
+
     ticket = Ticket(
         id=ticket_id,
         title=payload.title,
@@ -106,6 +126,9 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)):
         customer_name=payload.customer_name,
         customer_email=payload.customer_email,
         priority=payload.priority,
+        created_at=now,
+        first_response_due_at=first_resp_due,
+        resolution_due_at=res_due,
     )
     db.add(ticket)
     db.commit()
@@ -269,13 +292,31 @@ def post_ticket_message(
     )
     db.add(message)
 
-    # State transition: If agent replies publicly to customer, status moves to 'waiting_on_customer'
-    if sender_type == "agent" and not is_private and ticket.status in ("open", "in_progress"):
-        ticket.status = "waiting_on_customer"
+    now = datetime.now(timezone.utc)
 
-    # State transition: If customer replies back, ticket status moves back to 'in_progress'
-    elif sender_type == "customer" and ticket.status == "waiting_on_customer":
-        ticket.status = "in_progress"
+    # State transition & SLA Pause: If agent replies publicly to customer, status moves to 'waiting_on_customer'
+    if sender_type == "agent" and not is_private:
+        if ticket.status in ("open", "in_progress"):
+            ticket.status = "waiting_on_customer"
+        if ticket.first_responded_at is None:
+            ticket.first_responded_at = now
+        # REQ-SLA-03: Freeze SLA timer while waiting on customer
+        ticket.sla_paused_at = now
+
+    # State transition & SLA Resume: If customer replies back, ticket status moves back to 'in_progress'
+    elif sender_type == "customer":
+        if ticket.status == "waiting_on_customer":
+            ticket.status = "in_progress"
+        # REQ-SLA-03: Unfreeze SLA timer and extend deadlines by business duration waited
+        if ticket.sla_paused_at is not None:
+            paused_minutes = calculate_business_minutes_between(ticket.sla_paused_at, now)
+            if paused_minutes > 0:
+                if ticket.resolution_due_at is not None:
+                    ticket.resolution_due_at = add_business_minutes(ticket.resolution_due_at, paused_minutes)
+                if ticket.first_response_due_at is not None and ticket.first_responded_at is None:
+                    ticket.first_response_due_at = add_business_minutes(ticket.first_response_due_at, paused_minutes)
+                ticket.total_paused_minutes = (ticket.total_paused_minutes or 0) + paused_minutes
+            ticket.sla_paused_at = None
 
     db.commit()
     db.refresh(message)
@@ -317,6 +358,115 @@ def get_ticket_audit_trail(ticket_id: str, db: Session = Depends(get_db)):
         .all()
     )
     return [AuditLogOut.model_validate(log) for log in logs]
+
+
+# ── Module 4: Working Hours SLA Management & Resolution ──
+
+@app.patch("/api/tickets/{ticket_id}/priority", response_model=TicketOut)
+def update_ticket_priority(
+    ticket_id: str,
+    payload: PriorityUpdateRequest,
+    agent_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Answers the unanswered meeting question:
+    'What happens to the timer if we change a ticket to urgent in the middle?'
+
+    Recalculates the SLA clock dynamically from escalation point.
+    """
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    new_p = payload.priority.lower()
+    if new_p not in ("urgent", "medium", "small"):
+        raise HTTPException(status_code=400, detail="Invalid priority level. Must be urgent, medium, or small.")
+
+    prev_p = ticket.priority
+    if prev_p == new_p:
+        return _ticket_to_out(ticket)
+
+    now = datetime.now(timezone.utc)
+    new_resp, new_res = recalculate_sla_on_priority_change(
+        current_time=now,
+        new_priority=new_p,
+        first_responded_at=ticket.first_responded_at,
+    )
+
+    ticket.priority = new_p
+    if new_resp is not None:
+        ticket.first_response_due_at = new_resp
+    ticket.resolution_due_at = new_res
+
+    # Audit the escalation
+    effective_agent_id = payload.agent_id or agent_id
+    actor_name = "Support Agent"
+    if effective_agent_id:
+        agent = db.query(Agent).filter(Agent.id == effective_agent_id).first()
+        if agent:
+            actor_name = agent.name
+
+    log_audit(
+        db=db,
+        ticket_id=ticket.id,
+        actor_type="agent",
+        actor_id=effective_agent_id,
+        actor_name=actor_name,
+        action="PRIORITY_CHANGED",
+        details={
+            "previous_priority": prev_p,
+            "new_priority": new_p,
+            "first_response_due_at": ticket.first_response_due_at.isoformat() if ticket.first_response_due_at else None,
+            "resolution_due_at": ticket.resolution_due_at.isoformat() if ticket.resolution_due_at else None,
+        },
+    )
+
+    db.commit()
+    db.refresh(ticket)
+    return _ticket_to_out(ticket)
+
+
+@app.post("/api/tickets/{ticket_id}/resolve", response_model=TicketOut)
+def resolve_ticket(
+    ticket_id: str,
+    payload: Optional[ResolveTicketRequest] = None,
+    agent_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Mark a ticket as resolved ('done')."""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    now = datetime.now(timezone.utc)
+    ticket.status = "done"
+    ticket.resolved_at = now
+    ticket.sla_paused_at = None
+
+    effective_agent_id = (payload.agent_id if payload else None) or agent_id
+    actor_name = "Support Agent"
+    if effective_agent_id:
+        agent = db.query(Agent).filter(Agent.id == effective_agent_id).first()
+        if agent:
+            actor_name = agent.name
+
+    log_audit(
+        db=db,
+        ticket_id=ticket.id,
+        actor_type="agent",
+        actor_id=effective_agent_id,
+        actor_name=actor_name,
+        action="TICKET_RESOLVED",
+        details={
+            "status": "done",
+            "resolved_at": now.isoformat(),
+        },
+    )
+
+    db.commit()
+    db.refresh(ticket)
+    return _ticket_to_out(ticket)
+
 
 
 

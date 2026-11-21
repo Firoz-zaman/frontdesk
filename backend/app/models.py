@@ -42,6 +42,14 @@ class Ticket(Base):
     assigned_agent_id = Column(String(36), ForeignKey("agents.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
+    # Module 4: Working Hours SLA Tracking
+    first_response_due_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_due_at = Column(DateTime(timezone=True), nullable=True)
+    first_responded_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    sla_paused_at = Column(DateTime(timezone=True), nullable=True)
+    total_paused_minutes = Column(Integer, default=0, nullable=False)
+
     # Relationship
     assigned_agent = relationship("Agent", back_populates="assigned_tickets")
     messages = relationship("Message", back_populates="ticket", order_by="Message.created_at", cascade="all, delete-orphan")

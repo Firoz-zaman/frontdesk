@@ -67,5 +67,30 @@ export async function fetchAuditLogs(ticketId) {
   return res.json();
 }
 
+// Module 4: SLA Engine (INC-0327)
+export async function updatePriority(ticketId, priority, agentId) {
+  const res = await fetch(`${API}/api/tickets/${ticketId}/priority`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ priority, agent_id: agentId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to update priority');
+  }
+  return res.json();
+}
 
+export async function resolveTicket(ticketId, agentId) {
+  const res = await fetch(`${API}/api/tickets/${ticketId}/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_id: agentId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to resolve ticket');
+  }
+  return res.json();
+}
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket, fetchMessages, postMessage, fetchAuditLogs } from './api.js';
+import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket, fetchMessages, postMessage, fetchAuditLogs, updatePriority, resolveTicket } from './api.js';
 
 const FILTERS = [
   { label: 'All', value: '' },
@@ -20,6 +20,16 @@ function statusClass(s) {
 
 function statusLabel(s) {
   return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Module 4: SLA chip display helper (INC-0327)
+function SlaChip({ slaStatus }) {
+  if (!slaStatus) return null;
+  return (
+    <span className={`sla-chip ${slaStatus.badge_class || 'sla-chip-healthy'}`}>
+      {slaStatus.label}
+    </span>
+  );
 }
 
 // ── Create Ticket Modal ──
@@ -96,6 +106,7 @@ function TicketCard({ ticket, selected, onClick }) {
         <span>• {ticket.customer_name}</span>
         {ticket.assigned_agent_name && <span>• 👤 {ticket.assigned_agent_name}</span>}
       </div>
+      {ticket.sla_status && <SlaChip slaStatus={ticket.sla_status} />}
     </div>
   );
 }
@@ -112,6 +123,10 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
   const [activeTab, setActiveTab] = useState('conversation'); // 'conversation' | 'audit'
   const [auditLogs, setAuditLogs] = useState([]);
   const [loadingAudit, setLoadingAudit] = useState(false);
+
+  // Module 4: SLA actions state (INC-0327)
+  const [resolvingTicket, setResolvingTicket] = useState(false);
+  const [updatingPriority, setUpdatingPriority] = useState(false);
 
   // Load ticket messages whenever active ticket changes
   const loadMessages = useCallback(() => {
@@ -138,6 +153,38 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
     loadAudit();
   }, [loadMessages, loadAudit]);
 
+  // Module 4: Handle priority escalation (INC-0327)
+  const handlePriorityChange = async (newPriority) => {
+    if (!currentAgent) { alert('Select an agent profile first.'); return; }
+    if (newPriority === ticket.priority) return;
+    setUpdatingPriority(true);
+    try {
+      const updated = await updatePriority(ticket.id, newPriority, currentAgent.id);
+      if (onTicketUpdated) onTicketUpdated(updated);
+      loadAudit();
+    } catch (err) {
+      alert(err.message || 'Failed to update priority');
+    } finally {
+      setUpdatingPriority(false);
+    }
+  };
+
+  // Module 4: Handle ticket resolution (INC-0327)
+  const handleResolve = async () => {
+    if (!currentAgent) { alert('Select an agent profile first.'); return; }
+    if (!window.confirm(`Mark ${ticket.id} as resolved?`)) return;
+    setResolvingTicket(true);
+    try {
+      const updated = await resolveTicket(ticket.id, currentAgent.id);
+      if (onTicketUpdated) onTicketUpdated(updated);
+      loadAudit();
+    } catch (err) {
+      alert(err.message || 'Failed to resolve ticket');
+    } finally {
+      setResolvingTicket(false);
+    }
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!msgContent.trim() || !ticket) return;
@@ -155,10 +202,9 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
         sender_id: currentAgent.id,
         sender_name: currentAgent.name,
       });
-      setMsgContent('');
+      if (onTicketUpdated) onTicketUpdated();
       loadMessages();
       loadAudit();
-      if (onTicketUpdated) onTicketUpdated();
     } catch (err) {
       alert(err.message || 'Failed to send message');
     } finally {
@@ -193,6 +239,76 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
           <span>📅 {new Date(ticket.created_at).toLocaleString()}</span>
         </div>
       </div>
+
+      {/* Module 4: SLA Panel (INC-0327) */}
+      {ticket.sla_status && (
+        <div className="sla-panel">
+          <div className="sla-panel-left">
+            <span className="sla-panel-label">SLA Status</span>
+            <SlaChip slaStatus={ticket.sla_status} />
+            {ticket.sla_status.is_paused && (
+              <span className="sla-paused-hint">⏸ Timer paused — waiting on customer</span>
+            )}
+          </div>
+          <div className="sla-panel-right">
+            {ticket.first_response_due_at && (
+              <div className="sla-deadline-item">
+                <span className="sla-deadline-label">First Response</span>
+                <span className="sla-deadline-value">
+                  {ticket.first_responded_at
+                    ? <span className="sla-met">✓ {new Date(ticket.first_responded_at).toLocaleString()}</span>
+                    : new Date(ticket.first_response_due_at).toLocaleString()
+                  }
+                </span>
+              </div>
+            )}
+            {ticket.resolution_due_at && (
+              <div className="sla-deadline-item">
+                <span className="sla-deadline-label">Resolution Due</span>
+                <span className="sla-deadline-value">
+                  {ticket.resolved_at
+                    ? <span className="sla-met">✓ {new Date(ticket.resolved_at).toLocaleString()}</span>
+                    : new Date(ticket.resolution_due_at).toLocaleString()
+                  }
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Module 4: Priority Escalation + Resolve Actions */}
+      {ticket.status !== 'done' && ticket.status !== 'closed' && (
+        <div className="sla-action-bar">
+          <div className="sla-action-left">
+            <label className="sla-action-label">Priority:</label>
+            <select
+              value={ticket.priority}
+              onChange={e => handlePriorityChange(e.target.value)}
+              disabled={updatingPriority || !currentAgent}
+              className="priority-select"
+            >
+              <option value="urgent">🔴 Urgent</option>
+              <option value="medium">🟡 Medium</option>
+              <option value="small">🟢 Small</option>
+            </select>
+            {updatingPriority && <span className="sla-action-hint">Updating…</span>}
+          </div>
+          <button
+            className="btn-resolve"
+            onClick={handleResolve}
+            disabled={resolvingTicket || !currentAgent || !ticket.assigned_agent_id}
+          >
+            {resolvingTicket ? 'Resolving…' : '✅ Mark as Resolved'}
+          </button>
+        </div>
+      )}
+      {ticket.status === 'done' && (
+        <div className="resolved-banner">
+          ✅ <strong>Ticket Resolved</strong>
+          {ticket.resolved_at && <span> on {new Date(ticket.resolved_at).toLocaleString()}</span>}
+        </div>
+      )}
 
       {/* Module 1: Claim Action Banner (INC-0291) */}
       {!ticket.assigned_agent_id && (

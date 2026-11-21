@@ -38,8 +38,25 @@ class TicketOut(BaseModel):
     assigned_agent_id: Optional[str] = None
     assigned_agent_name: Optional[str] = None
     created_at: datetime
+    # Module 4: SLA tracking
+    first_response_due_at: Optional[datetime] = None
+    resolution_due_at: Optional[datetime] = None
+    first_responded_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    sla_paused_at: Optional[datetime] = None
+    sla_status: Optional[dict[str, Any]] = None
 
     model_config = {"from_attributes": True}
+
+
+class PriorityUpdateRequest(BaseModel):
+    priority: str  # urgent | medium | small
+    agent_id: Optional[str] = None
+
+
+class ResolveTicketRequest(BaseModel):
+    agent_id: Optional[str] = None
+
 
 
 # ── Claim (Module 1 - INC-0291) ──

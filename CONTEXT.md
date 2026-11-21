@@ -162,10 +162,107 @@ ALL AUDIT TRAIL TESTS PASSED SUCCESSFULLY! (INC-0318 Solved)
 
 ---
 
-## 6. Next Planned Step
+## 5. Step 4: Pluggable Module 4 — Working Hours SLA Engine (`INC-0327`)
 
-* **Step 4**: Pluggable Module 4 — Working Hours SLA Engine (Meera's SLA Rules).
-  - Business calendar: 09:30 to 18:30, Monday to Friday. Pauses on weekends & festival holidays.
-  - Priority targets: Urgent (2h reply, same day fix), Medium (4.5h reply, 3d fix), Small (1d reply, 1w fix).
-  - SLA timer pause during `waiting_on_customer`.
-  - Recalculation on priority change.
+### Incident / Requirement Addressed — Meera's SLA Rules & The Unanswered Meeting Question
+* **Context**: Arvo Systems operates strictly on Indian business hours (09:30 to 18:30, Monday through Friday, 9 working hours = 540 min/day).
+* **Key SLA Targets**:
+  - **Urgent**: First reply within 2 working hours (120 min), Fix same working day (18:30).
+  - **Medium**: First reply within half working day (4.5 hours = 270 min), Fix within 3 working days (1620 min).
+  - **Small**: First reply within 1 working day (9 hours = 540 min), Fix within 1 working week (5 working days = 2700 min).
+* **Timer Freezing Rule (REQ-SLA-03)**:
+  - While a ticket is `waiting_on_customer`, the SLA clock is paused completely.
+  - When the customer replies, the clock unpauses and deadlines are extended by the exact working duration paused.
+* **The Unanswered Meeting Question Resolved (REQ-SLA-06)**:
+  - *"What happens to the timer if we change a ticket to urgent in the middle?"*
+  - **Resolution**: Dynamically recalculates remaining deadlines from the escalation timestamp. If the first response has not yet occurred, response deadline is capped to the urgent SLA; resolution deadline is immediately adjusted to the new target from escalation time. Every escalation is logged in the immutable audit trail.
+
+### Implementation Pieces:
+
+#### Piece 1: Pure Business Hours Calculation Engine (`backend/app/sla.py`)
+- Independent, pure Python module.
+- Working window: `09:30 - 18:30`, `Monday - Friday`.
+- Pre-seeded 2026 festival holidays (Republic Day, Holi, Good Friday, May Day, Independence Day, Gandhi Jayanti, Diwali, Christmas, etc.).
+- Functions:
+  - `is_business_day(date, holidays)`: Checks weekday < 5 and holiday exclusion.
+  - `next_business_start(dt, holidays)`: Jumps to 09:30 on next valid working day.
+  - `add_business_minutes(start_dt, minutes)`: Advances time through business windows, skipping off-hours, weekends, and holidays.
+  - `calculate_business_minutes_between(start_dt, end_dt)`: Calculates exact working minutes elapsed.
+  - `compute_ticket_slas(created_at, priority)`: Sets initial response and resolution deadlines.
+  - `recalculate_sla_on_priority_change(current_time, new_priority, first_responded_at)`: Dynamically handles mid-lifecycle escalation.
+  - `compute_sla_status(ticket, current_time)`: Real-time SLA health evaluator returning badges (`sla-chip-healthy`, `sla-chip-due-soon`, `sla-chip-overdue`, `sla-chip-paused`, `sla-chip-completed`).
+
+#### Piece 2: Database Model & DTO Extension (`backend/app/models.py`, `backend/app/schemas.py`)
+- Added fields to `Ticket` model:
+  - `first_response_due_at`, `resolution_due_at`, `first_responded_at`, `resolved_at`, `sla_paused_at`, `total_paused_minutes`.
+- Extended `TicketOut` schema with all SLA fields + `sla_status` dictionary.
+- Created `PriorityUpdateRequest` and `ResolveTicketRequest` DTOs.
+
+#### Piece 3: API Integration & SLA Pause/Resume Lifecycle (`backend/app/main.py`)
+- `POST /api/tickets`: Automatically computes and attaches SLA deadlines on creation.
+- `POST /api/tickets/{id}/messages`:
+  - On public agent reply: Sets `first_responded_at` (if first reply), sets `status = "waiting_on_customer"`, freezes SLA with `sla_paused_at = now`.
+  - On customer reply: Calculates business minutes elapsed while paused, extends `resolution_due_at` accordingly, clears `sla_paused_at`, and returns ticket to `in_progress`.
+- `PATCH /api/tickets/{id}/priority`: Recalculates SLA deadlines from escalation point and logs `PRIORITY_CHANGED` in audit trail.
+- `POST /api/tickets/{id}/resolve`: Sets `status = "done"`, timestamps `resolved_at`, marks SLA completed, and logs `TICKET_RESOLVED` in audit trail.
+
+#### Piece 4: Frontend SLA Badges, Panel & Actions (`frontend/src/`)
+- `frontend/src/api.js`: Added `updatePriority` and `resolveTicket`.
+- `frontend/src/App.jsx`:
+  - Ticket Queue: Added live SLA chip (`Due in Xh Ym`, `Overdue`, `Paused`, `Resolved`) to every card.
+  - Ticket Detail: Added dedicated SLA status panel displaying response deadline, resolution deadline, pause notice, and completed checkmarks.
+  - Added Priority Escalation selector and "Mark as Resolved" action button.
+- `frontend/src/index.css`: Added clean styling for all SLA chip states and panel layouts.
+
+#### Piece 5: Automated Verification Test Suite (`backend/tests/test_sla_engine.py`)
+- 5 comprehensive automated tests:
+  1. `test_business_hours_calculations`: Verified same-day addition, Friday-to-Monday weekend skip, and Good Friday festival holiday skip.
+  2. `test_ticket_creation_sets_sla_deadlines`: Verified urgent, medium, and small SLA deadlines.
+  3. `test_sla_pause_and_resume_lifecycle`: Verified timer freeze on agent reply and unpause/deadline extension on customer reply.
+  4. `test_priority_escalation_recalculates_sla_and_audits`: Verified mid-lifecycle escalation recalculation and audit trail entry.
+  5. `test_ticket_resolution_freezes_sla`: Verified resolve marks status 'done', sets SLA state 'completed', and logs non-repudiation audit event.
+
+---
+
+## 6. Comprehensive Verification Test Suite Results (Steps 1, 2, 3, and 4)
+
+```
+[TEST 1] Testing Business Hours Calculation Logic...
+  ✓ Same-day addition within business hours passed.
+  ✓ Weekend skip (Friday -> Monday 11:00) passed.
+  ✓ Festival Holiday skip (Good Friday + Weekend -> Monday 10:00) passed.
+  ✓ Off-hours start advancement passed.
+
+[TEST 2] Testing Ticket SLA Deadlines by Priority...
+  ✓ Urgent ticket SLA initialized: Due in 42h 35m
+  ✓ Medium ticket SLA initialized: Due in 45h 5m
+  ✓ Small ticket SLA initialized: Due in 49h 35m
+
+[TEST 3] Testing SLA Pause / Resume on Customer Inactivity...
+  ✓ Ticket status moved to waiting_on_customer, SLA paused successfully.
+  ✓ Customer replied, ticket moved back to in_progress and SLA resumed.
+
+[TEST 4] Testing Mid-Lifecycle Priority Escalation...
+  ✓ Priority escalated to urgent, new resolution deadline: 2026-11-23T18:30:00
+  ✓ PRIORITY_CHANGED correctly recorded in immutable audit log.
+
+[TEST 5] Testing Ticket Resolution...
+  ✓ Ticket resolved successfully with SLA state 'completed'.
+  ✓ TICKET_RESOLVED correctly recorded in immutable audit log.
+
+✅ ALL STAGE 4 SLA ENGINE TESTS PASSED SUCCESSFULLY!
+
+Regression Tests:
+- Atomic Claiming (INC-0291): 4/4 PASSED
+- Note Isolation & Leak Prevention (INC-0304): 5/5 PASSED
+- Immutable Audit Trail (INC-0318): 3/3 PASSED
+```
+
+---
+
+## 7. Next Planned Step
+
+* **Step 5**: Pluggable Module 5 — Lifecycle Policies.
+  - Auto-close policy: Automatically close tickets after 5 working days in `waiting_on_customer`.
+  - Reopen policy: Reopen allowed within 7 calendar days of resolution; rejected after.
+
