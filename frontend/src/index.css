@@ -374,74 +374,6 @@ body {
   line-height: 1.5;
 }
 
-/* ── Customer Reply Simulation Banner ── */
-.v3-customer-simulator-banner {
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.simulator-banner-content {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.simulator-banner-icon {
-  font-size: 24px;
-  flex-shrink: 0;
-}
-
-.simulator-banner-title {
-  font-size: 13px;
-  color: #166534;
-  font-weight: 500;
-}
-
-.simulator-banner-title strong {
-  color: #14532d;
-}
-
-.simulator-banner-desc {
-  font-size: 12px;
-  color: #15803d;
-  margin-top: 2px;
-}
-
-.simulator-action-btn {
-  background: #16a34a;
-  color: #ffffff;
-  border: none;
-  border-radius: 6px;
-  padding: 8px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.15s ease-in-out;
-  white-space: nowrap;
-}
-
-.simulator-action-btn:hover:not(:disabled) {
-  background: #15803d;
-  box-shadow: 0 2px 4px rgba(22, 163, 74, 0.25);
-  transform: translateY(-1px);
-}
-
-.simulator-action-btn:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
 /* ── Composer ── */
 .composer-container {
   border: 1px solid var(--border);
@@ -1088,3 +1020,496 @@ body {
   color: #94a3b8;
   font-size: 0.875rem;
 }
+
+/* ── Customer Portal Styles (v5) ─────────────────────────────────────────── */
+
+.customer-portal-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #f8fafc;
+  font-family: inherit;
+}
+
+.customer-portal-header {
+  height: 64px;
+  background-color: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  color: #ffffff;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.portal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.portal-logo {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+}
+
+.portal-logo svg {
+  width: 18px;
+  height: 18px;
+}
+
+.portal-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.portal-subtitle {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.portal-header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.portal-live-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  background-color: #1e293b;
+  padding: 4px 10px;
+  border-radius: 9999px;
+}
+
+.portal-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ef4444;
+}
+
+.portal-live-dot.connected {
+  background-color: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+}
+
+.customer-user-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1e293b;
+  padding: 4px 12px 4px 4px;
+  border-radius: 9999px;
+  border: 1px solid #334155;
+}
+
+.customer-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #3b82f6;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.customer-user-meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.customer-user-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  line-height: 1.1;
+}
+
+.customer-user-email {
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+/* Portal Body & Split Layout */
+.customer-portal-body {
+  flex: 1;
+  display: flex;
+  height: calc(100vh - 64px);
+  overflow: hidden;
+}
+
+.customer-portal-sidebar {
+  width: 380px;
+  background-color: #ffffff;
+  border-right: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-action-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-heading {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.sidebar-count {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.portal-filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px;
+  background-color: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  overflow-x: auto;
+}
+
+.portal-filter-pill {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.portal-filter-pill:hover {
+  background: #f1f5f9;
+}
+
+.portal-filter-pill.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+
+.portal-ticket-feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.portal-ticket-card {
+  padding: 14px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background-color: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.portal-ticket-card:hover {
+  border-color: #94a3b8;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.portal-ticket-card.selected {
+  border-color: #3b82f6;
+  background-color: #eff6ff;
+  box-shadow: 0 0 0 1px #3b82f6;
+}
+
+.portal-ticket-card.action-required {
+  border-color: #f59e0b;
+  background-color: #fffbeb;
+}
+
+.portal-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.portal-card-id {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.portal-card-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 8px 0;
+  line-height: 1.3;
+}
+
+.portal-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.portal-card-date {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.portal-action-callout {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: #92400e;
+}
+
+/* Right Pane: Conversation & Workspace */
+.customer-portal-main {
+  flex: 1;
+  background-color: #ffffff;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.customer-ticket-workspace {
+  padding: 24px 32px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.ticket-hero-header {
+  padding-bottom: 18px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 20px;
+}
+
+.ticket-hero-id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.ticket-hero-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 8px 0;
+}
+
+.ticket-hero-meta {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.customer-waiting-banner {
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.waiting-banner-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.waiting-banner-title {
+  margin: 0 0 4px 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #b45309;
+}
+
+.waiting-banner-desc {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #92400e;
+  line-height: 1.4;
+}
+
+.ticket-detail-block {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+}
+
+.detail-block-title {
+  margin: 0 0 6px 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
+.detail-block-content {
+  font-size: 0.9rem;
+  color: #334155;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* Conversation Section */
+.customer-conversation-container {
+  margin-top: 10px;
+}
+
+.conversation-section-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 16px 0;
+}
+
+.customer-messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.customer-message-row {
+  display: flex;
+}
+
+.customer-message-row.message-inbound {
+  justify-content: flex-start;
+}
+
+.customer-message-row.message-outbound {
+  justify-content: flex-end;
+}
+
+.customer-bubble {
+  max-width: 80%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.message-inbound .customer-bubble {
+  background-color: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-bottom-left-radius: 2px;
+}
+
+.message-outbound .customer-bubble {
+  background-color: #2563eb;
+  color: #ffffff;
+  border-bottom-right-radius: 2px;
+}
+
+.customer-bubble-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.customer-bubble-sender {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.message-inbound .customer-bubble-sender {
+  color: #1e40af;
+}
+
+.message-outbound .customer-bubble-sender {
+  color: #e0e7ff;
+}
+
+.customer-bubble-time {
+  font-size: 0.7rem;
+  opacity: 0.8;
+}
+
+.customer-bubble-text {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+/* Reply Composer */
+.customer-reply-composer {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 14px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.customer-composer-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+  margin-bottom: 10px;
+}
+
+.customer-composer-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.customer-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.composer-tip {
+  font-size: 0.75rem;
+  color: #64748b;
+  font-style: italic;
+}
+

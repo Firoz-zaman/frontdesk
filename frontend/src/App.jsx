@@ -2,9 +2,10 @@ import React from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import { LoginPage } from './components/auth/LoginPage.jsx';
 import { DashboardLayout } from './components/layout/DashboardLayout.jsx';
+import { CustomerPortal } from './components/customer/CustomerPortal.jsx';
 
 function AppContent() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -22,6 +23,12 @@ function AppContent() {
     return <LoginPage />;
   }
 
+  // If customer is authenticated, direct to Customer Portal
+  if (user?.role === 'customer') {
+    return <CustomerPortal />;
+  }
+
+  // Otherwise, direct to Support Agent Workspace
   return <DashboardLayout />;
 }
 

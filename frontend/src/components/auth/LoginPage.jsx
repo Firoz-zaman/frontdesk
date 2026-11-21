@@ -2,6 +2,15 @@ import React, { useState } from 'react';
 import { useAuth } from '../../hooks/useAuth.js';
 import { Button, Input } from '../common/index.js';
 
+const DEMO_CUSTOMERS = [
+  {
+    name: 'Rahul Sharma',
+    email: 'customer@acmecorp.com',
+    role: 'customer',
+    desc: 'Acme Corporation (Customer Portal)',
+  },
+];
+
 const DEMO_AGENTS = [
   {
     name: 'Meera',
@@ -173,9 +182,45 @@ export function LoginPage() {
             </Button>
           </form>
 
+          {/* 1-Click Customer Profile */}
+          <div className="v3-demo-divider">
+            <span>Customer Portal Access (1-Click)</span>
+          </div>
+
+          <div className="v3-demo-grid" style={{ marginBottom: '14px' }}>
+            {DEMO_CUSTOMERS.map((cust) => (
+              <button
+                key={cust.email}
+                type="button"
+                className="v3-demo-chip"
+                style={{ borderColor: '#bfdbfe', background: '#f8fafc' }}
+                onClick={() => handleQuickLogin(cust.email)}
+                disabled={submitting}
+              >
+                <div className="v3-demo-chip-left">
+                  <div className="v3-demo-avatar" style={{ background: '#2563eb', color: '#fff' }}>
+                    {cust.name.charAt(0)}
+                  </div>
+                  <div>
+                    <div className="v3-demo-name" style={{ color: '#1e3a8a', fontWeight: 600 }}>
+                      {cust.name}
+                    </div>
+                    <div className="v3-demo-email">{cust.desc}</div>
+                  </div>
+                </div>
+                <span
+                  className="v3-demo-role"
+                  style={{ background: '#dbeafe', color: '#1e40af', fontWeight: 600 }}
+                >
+                  Customer
+                </span>
+              </button>
+            ))}
+          </div>
+
           {/* 1-Click Demo Agent Profiles */}
           <div className="v3-demo-divider">
-            <span>Quick Demo Profiles (1-Click)</span>
+            <span>Support Team Profiles (1-Click)</span>
           </div>
 
           <div className="v3-demo-grid">

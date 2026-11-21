@@ -15,10 +15,11 @@ export function AuthProvider({ children }) {
 
     if (storedToken) {
       getMe()
-        .then((agent) => {
+        .then((profile) => {
           if (mounted) {
-            if (agent) {
-              setUser(agent);
+            if (profile) {
+              const activeUser = profile.user_type === 'customer' ? profile.customer : (profile.agent || profile);
+              setUser(activeUser);
               setToken(storedToken);
             } else {
               logoutAgent();
@@ -48,9 +49,10 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password) => {
     const data = await loginAgent(email, password);
-    setUser(data.agent);
+    const activeUser = data.user_type === 'customer' ? data.customer : data.agent;
+    setUser(activeUser);
     setToken(data.access_token);
-    return data.agent;
+    return activeUser;
   }, []);
 
   const loginAs = useCallback(async (email) => {

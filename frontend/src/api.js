@@ -151,3 +151,50 @@ export async function triggerAutoClose() {
   return res.json();
 }
 
+// ── Customer Portal Endpoints (v5) ──────────────────────────────────────────
+
+export async function fetchCustomerTickets() {
+  const res = await fetch(`${API}/api/customer/tickets`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch customer tickets');
+  return res.json();
+}
+
+export async function fetchCustomerTicket(ticketId) {
+  const res = await fetch(`${API}/api/customer/tickets/${ticketId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch ticket');
+  return res.json();
+}
+
+export async function createCustomerTicket(ticketData) {
+  const res = await fetch(`${API}/api/customer/tickets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(ticketData),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to create ticket');
+  }
+  return res.json();
+}
+
+export async function fetchCustomerMessages(ticketId) {
+  const res = await fetch(`${API}/api/customer/tickets/${ticketId}/messages`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch messages');
+  return res.json();
+}
+
+export async function postCustomerMessage(ticketId, content) {
+  const res = await fetch(`${API}/api/customer/tickets/${ticketId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to post message');
+  }
+  return res.json();
+}
+
+
