@@ -1,0 +1,251 @@
+/* ── Frontdesk — Step 0 Core Base Styles ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --text: #111827;
+  --text-secondary: #6b7280;
+  --primary: #2563eb;
+  --primary-light: #dbeafe;
+  --urgent: #dc2626;
+  --urgent-bg: #fef2f2;
+  --medium: #f59e0b;
+  --medium-bg: #fffbeb;
+  --small: #10b981;
+  --small-bg: #ecfdf5;
+  --waiting: #6366f1;
+  --waiting-bg: #eef2ff;
+  --done-bg: #f9fafb;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* ── Navbar ── */
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 56px;
+  background: var(--primary);
+  color: white;
+}
+.navbar h1 { font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+.navbar select {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: none;
+  font-size: 14px;
+  background: rgba(255,255,255,0.15);
+  color: white;
+  cursor: pointer;
+}
+.navbar select option { color: #111; background: #fff; }
+
+/* ── Layout ── */
+.app-layout {
+  display: flex;
+  height: calc(100vh - 56px);
+}
+
+/* ── Left Panel: Ticket Queue ── */
+.ticket-queue {
+  width: 380px;
+  min-width: 320px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+}
+.queue-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.queue-header h2 { font-size: 14px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+.queue-filters {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.filter-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+.filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+.queue-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* ── Ticket Card (Queue Item) ── */
+.ticket-card {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ticket-card:hover { background: #f9fafb; }
+.ticket-card.selected { background: var(--primary-light); border-left: 3px solid var(--primary); }
+.ticket-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.ticket-id { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.ticket-card-title { font-size: 14px; font-weight: 500; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ticket-card-meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--text-secondary); }
+
+/* ── Tags / Badges ── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.badge-urgent { background: var(--urgent-bg); color: var(--urgent); }
+.badge-medium { background: var(--medium-bg); color: var(--medium); }
+.badge-small  { background: var(--small-bg);  color: var(--small); }
+.badge-status {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.status-open { background: #dbeafe; color: #1d4ed8; }
+.status-in_progress { background: #fef3c7; color: #b45309; }
+.status-waiting_on_customer { background: var(--waiting-bg); color: var(--waiting); }
+.status-done { background: #d1fae5; color: #047857; }
+.status-closed { background: #f3f4f6; color: #6b7280; }
+
+/* ── Right Panel: Ticket Detail ── */
+.ticket-detail {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  background: var(--bg);
+}
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  gap: 8px;
+}
+.empty-state svg { width: 48px; height: 48px; opacity: 0.4; }
+.detail-header { margin-bottom: 24px; }
+.detail-header h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+.detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.detail-meta span { display: flex; align-items: center; gap: 4px; }
+.detail-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.detail-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+.detail-section p { font-size: 14px; line-height: 1.6; }
+.customer-info {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.info-item label { display: block; font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 2px; }
+.info-item span { font-size: 14px; }
+
+/* ── Create Ticket Form ── */
+.create-btn {
+  padding: 6px 14px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.create-btn:hover { opacity: 0.9; }
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 24px;
+  width: 480px;
+  max-width: 90vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+}
+.modal h2 { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+.form-group input,
+.form-group textarea,
+.form-group select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.form-group textarea { resize: vertical; min-height: 80px; }
+.form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.btn-cancel {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.btn-submit {
+  padding: 8px 16px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}

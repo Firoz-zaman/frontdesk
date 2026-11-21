@@ -1,0 +1,30 @@
+const API = '';  // Vite proxy handles /api -> localhost:8000
+
+export async function fetchAgents() {
+  const res = await fetch(`${API}/api/agents`);
+  if (!res.ok) throw new Error('Failed to fetch agents');
+  return res.json();
+}
+
+export async function fetchTickets(status = '') {
+  const url = status ? `${API}/api/tickets?status=${status}` : `${API}/api/tickets`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to fetch tickets');
+  return res.json();
+}
+
+export async function fetchTicket(id) {
+  const res = await fetch(`${API}/api/tickets/${id}`);
+  if (!res.ok) throw new Error('Ticket not found');
+  return res.json();
+}
+
+export async function createTicket(data) {
+  const res = await fetch(`${API}/api/tickets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to create ticket');
+  return res.json();
+}
