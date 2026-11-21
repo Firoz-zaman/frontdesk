@@ -8,7 +8,7 @@ import { TicketDetail } from '../tickets/TicketDetail.jsx';
 import { CreateTicketModal } from '../tickets/CreateTicketModal.jsx';
 
 export function DashboardLayout() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [tickets, setTickets] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedTicket, setSelectedTicket] = useState(null);
