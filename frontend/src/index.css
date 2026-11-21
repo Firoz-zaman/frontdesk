@@ -1,5 +1,6 @@
 @import './styles/tokens.css';
 @import './styles/components.css';
+@import './styles/auth.css';
 
 /* ── Frontdesk — Step 0 Core Base Styles ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -913,4 +914,109 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* ── Loading Screen ───────────────────────────────────────────────────────── */
+.v3-loading-screen {
+  min-height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background-color: #f8fafc;
+}
+
+/* ── Navbar Enhancements (v3) ─────────────────────────────────────────────── */
+.v3-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.v3-nav-logo {
+  width: 30px;
+  height: 30px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+.v3-nav-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 4px 12px 4px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.v3-nav-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #3b82f6;
+  color: white;
+  font-weight: 700;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.v3-nav-user-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.v3-nav-user-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.v3-nav-role-badge {
+  font-size: 0.675rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+.v3-nav-role-badge.lead {
+  background-color: rgba(245, 158, 11, 0.25);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.v3-nav-role-badge.agent {
+  background-color: rgba(59, 130, 246, 0.25);
+  color: #bfdbfe;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.v3-btn-signout {
+  color: #fca5a5 !important;
+  font-size: 0.75rem !important;
+  padding: 2px 8px !important;
+  border-radius: 4px;
+}
+
+.v3-btn-signout:hover {
+  background-color: rgba(239, 68, 68, 0.15) !important;
+}
+
+/* ── Timeline Helpers ─────────────────────────────────────────────────────── */
+.timeline-loading,
+.timeline-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.875rem;
 }
