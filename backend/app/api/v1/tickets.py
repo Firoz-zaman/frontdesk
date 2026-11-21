@@ -180,17 +180,11 @@ def claim_ticket(ticket_id: str, payload: ClaimRequest, db: Session = Depends(ge
         },
     )
 
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(broadcaster.broadcast("TICKET_CLAIMED", {
-                "ticket_id": ticket_id,
-                "agent_id": agent.id,
-                "agent_name": agent.name,
-            }))
-    except Exception:
-        pass
+    broadcaster.publish("TICKET_CLAIMED", {
+        "ticket_id": ticket_id,
+        "agent_id": agent.id,
+        "agent_name": agent.name,
+    })
 
     return _ticket_to_out(ticket)
 
@@ -300,17 +294,11 @@ def resolve_ticket(
     db.commit()
     db.refresh(ticket)
 
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(broadcaster.broadcast("TICKET_RESOLVED", {
-                "ticket_id": ticket_id,
-                "resolved_by": actor_name,
-                "resolved_at": now.isoformat(),
-            }))
-    except Exception:
-        pass
+    broadcaster.publish("TICKET_RESOLVED", {
+        "ticket_id": ticket_id,
+        "resolved_by": actor_name,
+        "resolved_at": now.isoformat(),
+    })
 
     return _ticket_to_out(ticket)
 

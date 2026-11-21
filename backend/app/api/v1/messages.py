@@ -154,17 +154,11 @@ def post_ticket_message(
 
     # v2: Broadcast real-time event (only public messages — never expose private notes)
     if not is_private:
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(broadcaster.broadcast(action, {
-                    "ticket_id": ticket_id,
-                    "sender_type": sender_type,
-                    "sender_name": sender_name,
-                    "preview": payload.content[:80],
-                }))
-        except Exception:
-            pass
+        broadcaster.publish(action, {
+            "ticket_id": ticket_id,
+            "sender_type": sender_type,
+            "sender_name": sender_name,
+            "preview": payload.content[:80],
+        })
 
     return MessageOut.model_validate(message)

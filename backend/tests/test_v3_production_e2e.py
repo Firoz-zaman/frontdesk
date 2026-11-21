@@ -19,8 +19,11 @@ Verifies:
           - Deterministic HMAC verification and cross-customer rejection
 """
 import os
+import sys
 import unittest
 import requests
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 PASSWORD = "arvo2026!"

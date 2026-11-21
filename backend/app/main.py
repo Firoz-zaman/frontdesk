@@ -3,6 +3,7 @@
 Modular, production-structured application assembling core settings,
 lifespan database migrations, CORS middleware, and versioned API routers.
 """
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,12 +13,16 @@ from sqlalchemy import text
 from .core.config import settings
 from .database import engine, Base
 from .seed import seed_database
+from .events import broadcaster
 from .api.health import health_router
 from .api.v1.router import api_v1_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Set the running event loop for thread-safe event publishing
+    broadcaster.set_loop(asyncio.get_running_loop())
+
     # Create tables and execute idempotent migrations
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:

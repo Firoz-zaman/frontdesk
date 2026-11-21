@@ -381,23 +381,7 @@ class TestPush02BroadcasterFanout(unittest.TestCase):
 
 class TestPush03ClaimBroadcast(unittest.TestCase):
     def test_claim_endpoint_triggers_broadcast(self):
-        """POST /claim must call broadcaster.broadcast. We verify via queue subscription."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-        from app.events import broadcaster
-
-        received = []
-
-        async def _listen():
-            q = await broadcaster.subscribe()
-            try:
-                payload = await asyncio.wait_for(q.get(), timeout=5.0)
-                received.append(payload)
-            except asyncio.TimeoutError:
-                pass
-            finally:
-                broadcaster.unsubscribe(q)
-
-        # Create a fresh ticket, then claim it
+        """POST /claim must broadcast TICKET_CLAIMED event via SSE stream."""
         create_resp = api("/api/tickets", "POST", json={
             "title": "PUSH-03 test ticket",
             "description": "SSE claim broadcast test",
@@ -409,37 +393,69 @@ class TestPush03ClaimBroadcast(unittest.TestCase):
             self.skipTest("Could not create test ticket for PUSH-03")
         ticket_id = create_resp.json()["id"]
 
-        # Subscribe then claim — the claim endpoint broadcasts asynchronously
-        loop = asyncio.new_event_loop()
         import threading
+        import time
 
-        def run_listener():
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(_listen())
+        received_events = []
+        stop_stream = threading.Event()
+        connected_event = threading.Event()
 
-        t = threading.Thread(target=run_listener, daemon=True)
+        def stream_listener():
+            try:
+                resp = requests.get(f"{BASE_URL}/api/events/stream", stream=True, timeout=10)
+                current_event = None
+                for line in resp.iter_lines(decode_unicode=True):
+                    if stop_stream.is_set():
+                        break
+                    if not line:
+                        continue
+                    if line.startswith("event:"):
+                        current_event = line.split(":", 1)[1].strip()
+                        if current_event == "CONNECTED":
+                            connected_event.set()
+                    elif line.startswith("data:") and current_event:
+                        try:
+                            data = json.loads(line.split(":", 1)[1].strip())
+                            received_events.append({"event": current_event, "data": data})
+                            if current_event == "TICKET_CLAIMED" and data.get("ticket_id") == ticket_id:
+                                stop_stream.set()
+                                break
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        t = threading.Thread(target=stream_listener, daemon=True)
         t.start()
 
-        import time; time.sleep(0.1)  # Let listener attach
+        # Wait until SSE client is connected
+        if not connected_event.wait(timeout=5):
+            stop_stream.set()
+            self.skipTest("Could not establish SSE stream connection within 5s")
 
-        api("/api/tickets/{}/claim".format(ticket_id), "POST", json={
+        # Now claim ticket via HTTP
+        claim_resp = api(f"/api/tickets/{ticket_id}/claim", "POST", json={
             "agent_id": AGENT_MEERA_ID,
         })
+        self.assertEqual(claim_resp.status_code, 200)
 
-        t.join(timeout=6)
-        # Note: broadcast only reaches same-process queues; in test env this may be empty
-        # We assert the endpoint itself succeeded (broadcast best-effort)
-        self.skipTest(
-            "PUSH-03 is an integration test best verified end-to-end via SSE stream; "
-            "in-process assertion not feasible across sync/async boundary in test runner"
-        )
+        # Wait for SSE to receive the event
+        t.join(timeout=5)
+        stop_stream.set()
+
+        claimed_events = [
+            e for e in received_events
+            if e["event"] == "TICKET_CLAIMED" and e["data"].get("ticket_id") == ticket_id
+        ]
+        self.assertTrue(len(claimed_events) > 0, f"Expected TICKET_CLAIMED event for {ticket_id}, received: {received_events}")
+        self.assertEqual(claimed_events[0]["data"]["agent_id"], AGENT_MEERA_ID)
 
 
 # ── PUSH-04: Resolving triggers TICKET_RESOLVED downstream ───────────────────
 
 class TestPush04ResolveBroadcast(unittest.TestCase):
     def test_resolve_endpoint_succeeds_and_does_not_crash(self):
-        """POST /resolve must succeed. The broadcast is best-effort and non-blocking."""
+        """POST /resolve must succeed and broadcast TICKET_RESOLVED downstream."""
         create_resp = api("/api/tickets", "POST", json={
             "title": "PUSH-04 resolve broadcast test",
             "description": "SSE resolve broadcast test",
@@ -454,10 +470,56 @@ class TestPush04ResolveBroadcast(unittest.TestCase):
         # Claim it first
         api(f"/api/tickets/{ticket_id}/claim", "POST", json={"agent_id": AGENT_MEERA_ID})
 
-        # Resolve — must succeed and not raise
+        import threading
+        received_events = []
+        stop_stream = threading.Event()
+        connected_event = threading.Event()
+
+        def stream_listener():
+            try:
+                resp = requests.get(f"{BASE_URL}/api/events/stream", stream=True, timeout=10)
+                current_event = None
+                for line in resp.iter_lines(decode_unicode=True):
+                    if stop_stream.is_set():
+                        break
+                    if not line:
+                        continue
+                    if line.startswith("event:"):
+                        current_event = line.split(":", 1)[1].strip()
+                        if current_event == "CONNECTED":
+                            connected_event.set()
+                    elif line.startswith("data:") and current_event:
+                        try:
+                            data = json.loads(line.split(":", 1)[1].strip())
+                            received_events.append({"event": current_event, "data": data})
+                            if current_event == "TICKET_RESOLVED" and data.get("ticket_id") == ticket_id:
+                                stop_stream.set()
+                                break
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        t = threading.Thread(target=stream_listener, daemon=True)
+        t.start()
+
+        if not connected_event.wait(timeout=5):
+            stop_stream.set()
+            self.skipTest("Could not establish SSE stream connection within 5s")
+
+        # Resolve — must succeed and emit broadcast
         resolve_resp = api(f"/api/tickets/{ticket_id}/resolve", "POST", json={"agent_id": AGENT_MEERA_ID})
         self.assertEqual(resolve_resp.status_code, 200, f"Resolve failed: {resolve_resp.text}")
         self.assertEqual(resolve_resp.json()["status"], "done")
+
+        t.join(timeout=5)
+        stop_stream.set()
+
+        resolved_events = [
+            e for e in received_events
+            if e["event"] == "TICKET_RESOLVED" and e["data"].get("ticket_id") == ticket_id
+        ]
+        self.assertTrue(len(resolved_events) > 0, f"Expected TICKET_RESOLVED event for {ticket_id}, received: {received_events}")
 
 
 # ── REG-01: Backward compatibility (Stage 0-5 smoke test) ─────────────────────

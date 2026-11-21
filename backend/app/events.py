@@ -23,6 +23,11 @@ class EventBroadcaster:
 
     def __init__(self):
         self._subscribers: set[asyncio.Queue] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Register the running asyncio event loop for safe cross-thread publishing."""
+        self._loop = loop
 
     async def subscribe(self) -> asyncio.Queue:
         """Register a new client queue and return it."""
@@ -34,28 +39,48 @@ class EventBroadcaster:
         """Remove a client queue (called on disconnect / generator cleanup)."""
         self._subscribers.discard(queue)
 
-    async def broadcast(self, event_type: str, data: dict) -> None:
-        """Push a typed event to every connected subscriber.
+    def _enqueue(self, q: asyncio.Queue, payload: dict) -> None:
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            # Drop event for slow subscriber
+            pass
+        except Exception:
+            self._subscribers.discard(q)
 
-        Events that cannot be enqueued (full queue / no loop) are silently dropped
-        so that a slow client never blocks the main request path.
-        """
+    def publish(self, event_type: str, data: dict) -> None:
+        """Thread-safe event publishing from any thread (sync route worker or async)."""
         payload = {
             "event": event_type,
             "data": data,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        dead: set[asyncio.Queue] = set()
-        for q in list(self._subscribers):
+        loop = self._loop
+        if loop is not None and loop.is_running():
             try:
-                q.put_nowait(payload)
-            except asyncio.QueueFull:
-                # Drop event for this slow subscriber; do not disconnect it
-                pass
+                current_loop = None
+                try:
+                    current_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    pass
+
+                if current_loop is loop:
+                    for q in list(self._subscribers):
+                        self._enqueue(q, payload)
+                else:
+                    for q in list(self._subscribers):
+                        loop.call_soon_threadsafe(self._enqueue, q, payload)
             except Exception:
-                dead.add(q)
-        for q in dead:
-            self._subscribers.discard(q)
+                pass
+        else:
+            for q in list(self._subscribers):
+                self._enqueue(q, payload)
+
+    async def broadcast(self, event_type: str, data: dict) -> None:
+        """Push a typed event to every connected subscriber.
+        Async convenience wrapper around publish().
+        """
+        self.publish(event_type, data)
 
     @property
     def subscriber_count(self) -> int:
