@@ -1,6 +1,6 @@
 """Pydantic schemas — Core Base & Module DTOs."""
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
 from pydantic import BaseModel
 
@@ -81,3 +81,19 @@ class CustomerMessageOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Audit Logs (Module 3 - INC-0318) ──
+
+class AuditLogOut(BaseModel):
+    id: int
+    ticket_id: str
+    actor_type: str
+    actor_id: Optional[str] = None
+    actor_name: str
+    action: str
+    details: Optional[dict[str, Any]] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+

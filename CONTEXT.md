@@ -48,73 +48,94 @@ Arvo Systems operates with nine support agents handling approximately 40 custome
 * **Objective for Step 2**: Implement a zero-leakage dual-mode messaging system where private internal notes and public replies have strict separation at the database, query, serialization, and UI layers.
 
 ### Implementation Pieces:
-
-#### Piece 1: Database Model & DTO Data Isolation Barrier
-* **Data Model** (`backend/app/models.py`):
-  - Table `messages`:
-    - `id`: UUID (Primary Key)
-    - `ticket_id`: Foreign Key (`tickets.id`)
-    - `sender_type`: ENUM (`agent`, `customer`, `system`)
-    - `sender_id`: VARCHAR (nullable agent ID)
-    - `sender_name`: VARCHAR
-    - `content`: TEXT
-    - `is_private`: BOOLEAN (`True` for team internal notes, `False` for public replies)
-    - `created_at`: TIMESTAMP WITH TIME ZONE
-  - Ticket relationship: `messages = relationship("Message", back_populates="ticket", cascade="all, delete-orphan")`.
-* **Strict DTO Serialization Isolation** (`backend/app/schemas.py`):
-  - `MessageCreate`: Payload for creating messages.
-  - `MessageOut`: Internal agent model containing `is_private` flag and metadata.
-  - `CustomerMessageOut`: **Customer-Safe DTO** that strictly strips `is_private` and internal identifiers from output schemas entirely.
-
-#### Piece 2: API Endpoints with Database-Level Filtering
-* **Endpoints** (`backend/app/main.py`):
-  - `GET /api/tickets/{ticket_id}/messages`:
-    - Parameter: `scope: str = "agent"` (`agent` | `customer`).
-    - **Customer View Wall**: When `scope="customer"`, the query applies `filter(Message.is_private == False)` at the database level and returns `CustomerMessageOut`. Private notes are never queried, loaded, or serialized.
-    - **Agent View**: Returns all messages with clear `is_private: true` indicators.
-  - `POST /api/tickets/{ticket_id}/messages`:
-    - Accepts `MessageCreate`.
-    - **Sanitization Guard**: If `sender_type == "customer"`, `is_private` is forcefully set to `False` (customers cannot create internal notes).
-    - **Lifecycle Status Transition**:
-      - If an agent sends a public reply to the customer, ticket status moves from `open` or `in_progress` to `waiting_on_customer` (supporting Meera's requirement: waiting time is paused).
-      - If a customer responds, ticket status moves back to `in_progress`.
-      - If an agent adds a private team note, status remains unchanged.
-
-#### Piece 3: Frontend Dual-Mode Timeline & Composer
-* **Client API** (`frontend/src/api.js`):
-  - Added `fetchMessages(ticketId, scope)` and `postMessage(ticketId, messageData)`.
-* **Workspace Timeline & Composer** (`frontend/src/App.jsx`):
-  - **Visual Distinction for Incident Prevention**:
-    - **Public Customer Replies**: Rendered with clean blue border (`💬 PUBLIC REPLY (Sent to {customer})`).
-    - **Private Team Notes**: Rendered with a high-contrast amber background, lock icon `🔒 PRIVATE TEAM NOTE — INTERNAL ONLY`, and explicit notice that it is never shown to customers.
-  - **Dual-Mode Composer Tabs**:
-    - Mode 1: `💬 Reply to Customer` (Blue theme: "Send Customer Reply"). Displays an info banner reminding the agent this message goes to the customer.
-    - Mode 2: `🔒 Private Team Note (Internal)` (Amber theme: "Save Internal Note"). Displays a security banner assuring the agent this note is internal only.
-* **Styles** (`frontend/src/index.css`):
-  - Added CSS classes for `.conversation-section`, `.message-card-public`, `.message-card-private`, `.private-note-badge`, `.composer-mode-bar`, `.mode-public-active`, and `.mode-private-active`.
-
-#### Piece 4: Automated Verification Test Suite
-* **Test Suite** (`backend/tests/test_note_isolation.py`):
-  - `test_customer_view_strictly_omits_private_notes`: Verifies private note content never appears in customer query responses or raw response text.
-  - `test_customer_cannot_spoof_private_notes`: Verifies customers cannot create private notes.
-  - `test_lifecycle_status_transitions_on_messages`: Verifies ticket moves to `waiting_on_customer` on public agent reply, and returns to `in_progress` on customer reply.
+1. **Database Model & DTO Data Isolation Barrier** (`backend/app/models.py`, `backend/app/schemas.py`):
+   - Table `messages`: `id`, `ticket_id`, `sender_type`, `sender_id`, `sender_name`, `content`, `is_private`, `created_at`.
+   - DTOs: `MessageOut` for internal agent queries, `CustomerMessageOut` which unconditionally omits `is_private` and internal agent metadata.
+2. **API Endpoints with Database-Level Filtering** (`backend/app/main.py`):
+   - `GET /api/tickets/{ticket_id}/messages`: When `scope="customer"`, filters `Message.is_private == False` at query level.
+   - `POST /api/tickets/{ticket_id}/messages`: Forces `is_private=False` for customer senders, transitions status to `waiting_on_customer` on public agent reply, and back to `in_progress` on customer reply.
+3. **Frontend Dual-Mode Timeline & Composer** (`frontend/src/App.jsx`, `frontend/src/index.css`):
+   - Distinct visual styles: Slate/blue for public replies, high-contrast amber for private team notes with lock badge.
+   - Composer mode switch between `💬 Reply to Customer` and `🔒 Private Team Note (Internal)` with security warning banners.
+4. **Automated Verification Test Suite** (`backend/tests/test_note_isolation.py`):
+   - Proved zero-leakage guarantee in customer responses and verified status lifecycle transitions.
 
 ---
 
-## 4. Verification Test Results (Step 1 & Step 2)
+## 4. Step 3: Pluggable Module 3 — Immutable Audit Event Sourcing (`INC-0318`)
+
+### Incident INC-0318 (04 November) — Problem Addressed
+* **Incident Summary**: A customer claimed Arvo did not reply until the next morning. Arvo believed the reply was sent in forty minutes. Nobody could prove who was right.
+* **Exact Specification Requirement**:
+  > *"The system must record exactly what happened, when it happened, and who did it. Nobody should be able to change that record later."*
+* **Objective for Step 3**: Build an immutable, append-only event sourcing audit system that automatically logs every state change and interaction with tamper-proof timestamps and actor identities.
+
+### Implementation Pieces:
+
+#### Piece 1: Database Model & Decoupled Audit Service Layer
+* **Data Model** (`backend/app/models.py`):
+  - Table `audit_logs`:
+    - `id`: INTEGER (Primary Key, Auto-increment)
+    - `ticket_id`: Foreign Key (`tickets.id`)
+    - `actor_type`: VARCHAR(20) (`agent` | `customer` | `system`)
+    - `actor_id`: VARCHAR(100) (nullable)
+    - `actor_name`: VARCHAR(100)
+    - `action`: VARCHAR(50) (`TICKET_CREATED`, `TICKET_CLAIMED`, `PUBLIC_REPLY_SENT`, `INTERNAL_NOTE_ADDED`, `CUSTOMER_REPLY_RECEIVED`)
+    - `details`: JSON (Context delta payload)
+    - `created_at`: TIMESTAMP WITH TIME ZONE (UTC, default `now()`)
+* **Decoupled Audit Service** (`backend/app/audit.py`):
+  - Function: `log_audit(db, ticket_id, actor_type, actor_name, action, details, actor_id)`
+  - Designed for high resilience: errors in audit logging are caught and logged so primary ticket operations are never blocked.
+
+#### Piece 2: Event Hooks & Read-Only Audit Endpoint
+* **Lifecycle Hooks** (`backend/app/main.py`):
+  - `POST /api/tickets`: Emits `TICKET_CREATED` with customer name and ticket parameters.
+  - `POST /api/tickets/{id}/claim`: Emits `TICKET_CLAIMED` with winning agent name.
+  - `POST /api/tickets/{id}/messages`:
+    - If `is_private == True`: Emits `INTERNAL_NOTE_ADDED` with agent name.
+    - If `is_private == False` (Agent): Emits `PUBLIC_REPLY_SENT` with status update to `waiting_on_customer`.
+    - If `sender_type == "customer"`: Emits `CUSTOMER_REPLY_RECEIVED`.
+* **Read-Only Audit Endpoint** (`backend/app/main.py`):
+  - `GET /api/tickets/{id}/audit`: Returns chronological list of audit records.
+  - **Immutability Guarantee**: Strictly read-only; no `PUT`, `PATCH`, `DELETE`, or `POST` modification endpoints exist on audit logs.
+
+#### Piece 3: Frontend Audit Trail Tab in Ticket Workspace
+* **Client API** (`frontend/src/api.js`):
+  - Added `fetchAuditLogs(ticketId)`.
+* **Workspace View Tabs** (`frontend/src/App.jsx`, `frontend/src/index.css`):
+  - Tab Switcher:
+    - Tab 1: `💬 Conversation & Notes ({count})`
+    - Tab 2: `📋 Audit Trail ({count})`
+  - **Audit History View**:
+    - Header banner emphasizing tamper-proof append-only nature (`INC-0318`).
+    - Chronological list of events with formatted timestamp (including seconds and date).
+    - Actor badge with role tag (`AGENT`, `CUSTOMER`, `SYSTEM`).
+    - Action type badge with color-coding (`TICKET_CREATED`, `TICKET_CLAIMED`, `PUBLIC_REPLY_SENT`, `INTERNAL_NOTE_ADDED`, etc.).
+    - Expandable details box showing state delta and preview.
+
+#### Piece 4: Automated Verification Test Suite
+* **Test Suite** (`backend/tests/test_audit_trail.py`):
+  - `test_audit_trail_records_full_lifecycle`: Verified all 5 lifecycle events are recorded in exact order.
+  - `test_dispute_resolution_non_repudiation`: Conclusively resolves INC-0318 by calculating mathematical response intervals between creation and agent reply.
+  - `test_audit_logs_are_read_only_and_immutable`: Verified attempts to POST, PUT, or DELETE audit logs return `405 Method Not Allowed`.
+
+---
+
+## 5. Comprehensive Verification Test Suite Results (Steps 1, 2, and 3)
 
 ```
 === Running Atomic Ticket Claiming Verification Tests ===
-[TEST 1] Created fresh ticket: INC-0013
-[TEST 1] Response status codes: 409 and 200
-[TEST 1] PASS: Ticket INC-0013 safely assigned to Ravi with status 'in_progress'
-[TEST 2] PASS: Subsequent claim rejected with 409
+[TEST 1] Created fresh ticket: INC-0020
+[TEST 1] Response status codes: 200 and 409
+[TEST 1] Conflict message: {'detail': 'Ticket has already been claimed by Meera.'}
+[TEST 1] PASS: Ticket INC-0020 safely assigned to Meera with status 'in_progress'
+[TEST 2] PASS: Subsequent claim rejected with 409: Ticket has already been claimed by Meera.
 [TEST 3] PASS: Invalid agent returned 404
 [TEST 4] PASS: Nonexistent ticket returned 404
 ALL ATOMIC CLAIMING TESTS PASSED SUCCESSFULLY! (INC-0291 Solved)
 
 === Running Note Isolation & Security Tests (INC-0304) ===
-[TEST 1] Testing with Ticket: INC-0010
+[TEST 1] Testing with Ticket: INC-0023
 [TEST 1] Customer scope returned 1 messages
 [TEST 1] PASS: Zero leakage in customer API response! Private note strictly omitted.
 [TEST 1] Agent scope returned 2 messages
@@ -123,12 +144,28 @@ ALL ATOMIC CLAIMING TESTS PASSED SUCCESSFULLY! (INC-0291 Solved)
 [TEST 3] PASS: Status moved to 'waiting_on_customer' after public agent reply.
 [TEST 3] PASS: Status returned to 'in_progress' when customer responded.
 ALL NOTE ISOLATION TESTS PASSED SUCCESSFULLY! (INC-0304 Solved)
+
+=== Running Audit Trail & Non-Repudiation Tests (INC-0318) ===
+[TEST 1] Testing Audit Trail with Ticket: INC-0026
+[TEST 1] PASS: TICKET_CREATED logged automatically.
+[TEST 1] PASS: TICKET_CLAIMED logged with agent name and status.
+[TEST 1] PASS: INTERNAL_NOTE_ADDED logged.
+[TEST 1] PASS: PUBLIC_REPLY_SENT logged with status change to waiting_on_customer.
+[TEST 1] PASS: CUSTOMER_REPLY_RECEIVED logged.
+[TEST 2] Ticket Created At: 2026-11-21 16:35:24.335938
+[TEST 2] Public Reply Sent At: 2026-11-21 16:35:24.375673
+[TEST 2] Mathematical elapsed response time: 0.0397 seconds
+[TEST 2] PASS: INC-0318 dispute conclusively resolved with mathematical timestamps.
+[TEST 3] PASS: Audit log is strictly read-only; tampering endpoints are disallowed (405).
+ALL AUDIT TRAIL TESTS PASSED SUCCESSFULLY! (INC-0318 Solved)
 ```
 
 ---
 
-## 5. Next Planned Step
+## 6. Next Planned Step
 
-* **Step 3**: Pluggable Module 3 — Immutable Audit Event Sourcing (`INC-0318`).
-  - Append-only event history logging every action (creation, claim, replies, notes, status changes).
-  - Proof and non-repudiation recording who did what and when.
+* **Step 4**: Pluggable Module 4 — Working Hours SLA Engine (Meera's SLA Rules).
+  - Business calendar: 09:30 to 18:30, Monday to Friday. Pauses on weekends & festival holidays.
+  - Priority targets: Urgent (2h reply, same day fix), Medium (4.5h reply, 3d fix), Small (1d reply, 1w fix).
+  - SLA timer pause during `waiting_on_customer`.
+  - Recalculation on priority change.

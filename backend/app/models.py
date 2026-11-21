@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Boolean
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Boolean, JSON
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -45,6 +45,7 @@ class Ticket(Base):
     # Relationship
     assigned_agent = relationship("Agent", back_populates="assigned_tickets")
     messages = relationship("Message", back_populates="ticket", order_by="Message.created_at", cascade="all, delete-orphan")
+    audit_logs = relationship("AuditLog", back_populates="ticket", order_by="AuditLog.created_at.asc()", cascade="all, delete-orphan")
 
 
 class Message(Base):
@@ -60,4 +61,20 @@ class Message(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
     ticket = relationship("Ticket", back_populates="messages")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticket_id = Column(String(20), ForeignKey("tickets.id"), nullable=False)
+    actor_type = Column(String(20), nullable=False)  # agent | customer | system
+    actor_id = Column(String(100), nullable=True)
+    actor_name = Column(String(100), nullable=False)
+    action = Column(String(50), nullable=False)  # TICKET_CREATED, TICKET_CLAIMED, PUBLIC_REPLIED, INTERNAL_NOTE_ADDED, etc.
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    ticket = relationship("Ticket", back_populates="audit_logs")
+
 

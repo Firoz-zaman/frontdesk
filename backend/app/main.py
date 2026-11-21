@@ -8,7 +8,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from .database import engine, get_db, Base
-from .models import Agent, Ticket, Message
+from .models import Agent, Ticket, Message, AuditLog
 from .schemas import (
     AgentOut,
     TicketCreate,
@@ -17,9 +17,11 @@ from .schemas import (
     MessageCreate,
     MessageOut,
     CustomerMessageOut,
+    AuditLogOut,
 )
 from .seed import seed_database
 from .utils import next_ticket_id
+from .audit import log_audit
 
 
 @asynccontextmanager
@@ -108,6 +110,21 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)):
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
+
+    # INC-0318: Record immutable ticket creation audit event
+    log_audit(
+        db=db,
+        ticket_id=ticket.id,
+        actor_type="customer",
+        actor_name=ticket.customer_name,
+        action="TICKET_CREATED",
+        details={
+            "title": ticket.title,
+            "priority": ticket.priority,
+            "customer_email": ticket.customer_email,
+        },
+    )
+
     return _ticket_to_out(ticket)
 
 
@@ -152,6 +169,21 @@ def claim_ticket(ticket_id: str, payload: ClaimRequest, db: Session = Depends(ge
 
     db.commit()
     db.refresh(ticket)
+
+    # INC-0318: Record immutable ticket claiming audit event
+    log_audit(
+        db=db,
+        ticket_id=ticket_id,
+        actor_type="agent",
+        actor_id=agent.id,
+        actor_name=agent.name,
+        action="TICKET_CLAIMED",
+        details={
+            "assigned_to": agent.name,
+            "status": "in_progress",
+        },
+    )
+
     return _ticket_to_out(ticket)
 
 
@@ -247,6 +279,44 @@ def post_ticket_message(
 
     db.commit()
     db.refresh(message)
+
+    # INC-0318: Record non-repudiation audit event for every communication
+    action = "INTERNAL_NOTE_ADDED" if is_private else ("PUBLIC_REPLY_SENT" if sender_type == "agent" else "CUSTOMER_REPLY_RECEIVED")
+    log_audit(
+        db=db,
+        ticket_id=ticket_id,
+        actor_type=sender_type,
+        actor_id=payload.sender_id,
+        actor_name=sender_name,
+        action=action,
+        details={
+            "is_private": is_private,
+            "status": ticket.status,
+            "preview": payload.content[:120] + ("..." if len(payload.content) > 120 else ""),
+        },
+    )
+
     return MessageOut.model_validate(message)
+
+
+# ── Module 3: Immutable Audit Event Sourcing (INC-0318) ──
+
+@app.get("/api/tickets/{ticket_id}/audit", response_model=list[AuditLogOut])
+def get_ticket_audit_trail(ticket_id: str, db: Session = Depends(get_db)):
+    """Fetch append-only chronological audit log for non-repudiation (INC-0318).
+    Strictly read-only; no update or delete endpoints exist.
+    """
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.ticket_id == ticket_id)
+        .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+        .all()
+    )
+    return [AuditLogOut.model_validate(log) for log in logs]
+
 
 

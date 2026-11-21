@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket, fetchMessages, postMessage } from './api.js';
+import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket, fetchMessages, postMessage, fetchAuditLogs } from './api.js';
 
 const FILTERS = [
   { label: 'All', value: '' },
@@ -108,6 +108,11 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
   const [msgContent, setMsgContent] = useState('');
   const [sendingMsg, setSendingMsg] = useState(false);
 
+  // Module 3: Audit Trail State (INC-0318)
+  const [activeTab, setActiveTab] = useState('conversation'); // 'conversation' | 'audit'
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+
   // Load ticket messages whenever active ticket changes
   const loadMessages = useCallback(() => {
     if (!ticket) return;
@@ -118,9 +123,20 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
       .finally(() => setLoadingMessages(false));
   }, [ticket?.id]);
 
+  // Load audit logs
+  const loadAudit = useCallback(() => {
+    if (!ticket) return;
+    setLoadingAudit(true);
+    fetchAuditLogs(ticket.id)
+      .then(setAuditLogs)
+      .catch(console.error)
+      .finally(() => setLoadingAudit(false));
+  }, [ticket?.id]);
+
   useEffect(() => {
     loadMessages();
-  }, [loadMessages]);
+    loadAudit();
+  }, [loadMessages, loadAudit]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -141,6 +157,7 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
       });
       setMsgContent('');
       loadMessages();
+      loadAudit();
       if (onTicketUpdated) onTicketUpdated();
     } catch (err) {
       alert(err.message || 'Failed to send message');
@@ -215,95 +232,167 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
         </div>
       </div>
 
-      {/* Module 2: Conversation & Dual-Mode Messaging (INC-0304) */}
-      <div className="detail-section conversation-section">
-        <h3>Conversation & Notes ({messages.length})</h3>
+      {/* Navigation Tabs for Conversation vs Audit Trail */}
+      <div className="workspace-tab-bar">
+        <button
+          type="button"
+          className={`workspace-tab-btn ${activeTab === 'conversation' ? 'workspace-tab-active' : ''}`}
+          onClick={() => setActiveTab('conversation')}
+        >
+          💬 Conversation & Notes ({messages.length})
+        </button>
+        <button
+          type="button"
+          className={`workspace-tab-btn ${activeTab === 'audit' ? 'workspace-tab-active' : ''}`}
+          onClick={() => {
+            setActiveTab('audit');
+            loadAudit();
+          }}
+        >
+          📋 Audit Trail ({auditLogs.length})
+        </button>
+      </div>
 
-        {/* Message Timeline */}
-        <div className="timeline-container">
-          {loadingMessages && <div className="timeline-loading">Loading conversation…</div>}
-          {!loadingMessages && messages.length === 0 && (
-            <div className="timeline-empty">No replies or notes recorded yet.</div>
-          )}
-          {messages.map((m) => (
-            <div
-              key={m.id}
-              className={`message-card ${m.is_private ? 'message-card-private' : 'message-card-public'}`}
-            >
-              <div className="message-header">
-                <div className="message-sender">
-                  <strong>{m.sender_name}</strong>
-                  <span className="sender-type-tag">({m.sender_type})</span>
-                  {m.is_private && (
-                    <span className="private-note-badge">
-                      🔒 PRIVATE TEAM NOTE — INTERNAL ONLY
-                    </span>
-                  )}
+      {/* Tab 1: Module 2 Conversation & Dual-Mode Messaging */}
+      {activeTab === 'conversation' && (
+        <div className="detail-section conversation-section">
+          {/* Message Timeline */}
+          <div className="timeline-container">
+            {loadingMessages && <div className="timeline-loading">Loading conversation…</div>}
+            {!loadingMessages && messages.length === 0 && (
+              <div className="timeline-empty">No replies or notes recorded yet.</div>
+            )}
+            {messages.map((m) => (
+              <div
+                key={m.id}
+                className={`message-card ${m.is_private ? 'message-card-private' : 'message-card-public'}`}
+              >
+                <div className="message-header">
+                  <div className="message-sender">
+                    <strong>{m.sender_name}</strong>
+                    <span className="sender-type-tag">({m.sender_type})</span>
+                    {m.is_private && (
+                      <span className="private-note-badge">
+                        🔒 PRIVATE TEAM NOTE — INTERNAL ONLY
+                      </span>
+                    )}
+                  </div>
+                  <span className="message-time">{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
-                <span className="message-time">{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <div className="message-content">{m.content}</div>
               </div>
-              <div className="message-content">{m.content}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Dual-Mode Message Composer */}
-        <div className="composer-container">
-          <div className="composer-mode-bar">
-            <button
-              type="button"
-              className={`composer-mode-btn ${msgMode === 'public' ? 'mode-public-active' : ''}`}
-              onClick={() => setMsgMode('public')}
-            >
-              💬 Reply to Customer
-            </button>
-            <button
-              type="button"
-              className={`composer-mode-btn ${msgMode === 'private' ? 'mode-private-active' : ''}`}
-              onClick={() => setMsgMode('private')}
-            >
-              🔒 Private Team Note (Internal)
-            </button>
+            ))}
           </div>
 
-          <form onSubmit={handleSendMessage} className={`composer-form ${msgMode === 'private' ? 'form-private-theme' : 'form-public-theme'}`}>
-            {msgMode === 'private' && (
-              <div className="composer-warning-banner">
-                🔒 <strong>Internal Team Note:</strong> This note will NEVER be visible to the customer on any screen or API response.
-              </div>
-            )}
-            {msgMode === 'public' && (
-              <div className="composer-info-banner">
-                💬 <strong>Customer Reply:</strong> This will be sent directly to <strong>{ticket.customer_name}</strong> and advances ticket status to <em>Waiting on Customer</em>.
-              </div>
-            )}
-            <textarea
-              required
-              rows={3}
-              placeholder={
-                msgMode === 'private'
-                  ? 'Write an internal note for team members (visible only to agents)...'
-                  : `Draft your response to ${ticket.customer_name}...`
-              }
-              value={msgContent}
-              onChange={(e) => setMsgContent(e.target.value)}
-            />
-            <div className="composer-actions">
+          {/* Dual-Mode Message Composer */}
+          <div className="composer-container">
+            <div className="composer-mode-bar">
               <button
-                type="submit"
-                disabled={sendingMsg || !msgContent.trim()}
-                className={`btn-send ${msgMode === 'private' ? 'btn-send-private' : 'btn-send-public'}`}
+                type="button"
+                className={`composer-mode-btn ${msgMode === 'public' ? 'mode-public-active' : ''}`}
+                onClick={() => setMsgMode('public')}
               >
-                {sendingMsg
-                  ? 'Saving…'
-                  : msgMode === 'private'
-                  ? '🔒 Save Internal Note'
-                  : '💬 Send Customer Reply'}
+                💬 Reply to Customer
+              </button>
+              <button
+                type="button"
+                className={`composer-mode-btn ${msgMode === 'private' ? 'mode-private-active' : ''}`}
+                onClick={() => setMsgMode('private')}
+              >
+                🔒 Private Team Note (Internal)
               </button>
             </div>
-          </form>
+
+            <form onSubmit={handleSendMessage} className={`composer-form ${msgMode === 'private' ? 'form-private-theme' : 'form-public-theme'}`}>
+              {msgMode === 'private' && (
+                <div className="composer-warning-banner">
+                  🔒 <strong>Internal Team Note:</strong> This note will NEVER be visible to the customer on any screen or API response.
+                </div>
+              )}
+              {msgMode === 'public' && (
+                <div className="composer-info-banner">
+                  💬 <strong>Customer Reply:</strong> This will be sent directly to <strong>{ticket.customer_name}</strong> and advances ticket status to <em>Waiting on Customer</em>.
+                </div>
+              )}
+              <textarea
+                required
+                rows={3}
+                placeholder={
+                  msgMode === 'private'
+                    ? 'Write an internal note for team members (visible only to agents)...'
+                    : `Draft your response to ${ticket.customer_name}...`
+                }
+                value={msgContent}
+                onChange={(e) => setMsgContent(e.target.value)}
+              />
+              <div className="composer-actions">
+                <button
+                  type="submit"
+                  disabled={sendingMsg || !msgContent.trim()}
+                  className={`btn-send ${msgMode === 'private' ? 'btn-send-private' : 'btn-send-public'}`}
+                >
+                  {sendingMsg
+                    ? 'Saving…'
+                    : msgMode === 'private'
+                    ? '🔒 Save Internal Note'
+                    : '💬 Send Customer Reply'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Tab 2: Module 3 Immutable Audit Trail (INC-0318) */}
+      {activeTab === 'audit' && (
+        <div className="detail-section audit-section">
+          <div className="audit-security-header">
+            🔒 <strong>Tamper-Proof Audit Trail (INC-0318)</strong>
+            <span>Append-only chronological log. Proves exactly what occurred, when it happened, and who executed each action.</span>
+          </div>
+
+          <div className="audit-timeline-container">
+            {loadingAudit && <div className="timeline-loading">Loading audit records…</div>}
+            {!loadingAudit && auditLogs.length === 0 && (
+              <div className="timeline-empty">No audit events recorded for this ticket yet.</div>
+            )}
+            {auditLogs.map((log) => (
+              <div key={log.id} className="audit-entry-card">
+                <div className="audit-entry-top">
+                  <div className="audit-actor-badge">
+                    <span className={`actor-type-pill pill-${log.actor_type}`}>
+                      {log.actor_type.toUpperCase()}
+                    </span>
+                    <strong>{log.actor_name}</strong>
+                  </div>
+                  <span className={`action-badge action-${log.action.toLowerCase()}`}>
+                    {log.action}
+                  </span>
+                  <span className="audit-timestamp">
+                    {new Date(log.created_at).toLocaleString([], {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })}
+                  </span>
+                </div>
+                {log.details && (
+                  <div className="audit-details-box">
+                    {Object.entries(log.details).map(([k, v]) => (
+                      <span key={k} className="audit-detail-item">
+                        <em>{k}:</em> {String(v)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

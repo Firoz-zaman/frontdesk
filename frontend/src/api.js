@@ -61,4 +61,11 @@ export async function postMessage(ticketId, messageData) {
   return res.json();
 }
 
+export async function fetchAuditLogs(ticketId) {
+  const res = await fetch(`${API}/api/tickets/${ticketId}/audit`);
+  if (!res.ok) throw new Error('Failed to fetch audit trail');
+  return res.json();
+}
+
+
 
