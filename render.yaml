@@ -1,0 +1,22 @@
+##############################################################################
+# Render Blueprint — Frontdesk Backend (Free Tier)
+# https://render.com/docs/blueprint-spec
+##############################################################################
+services:
+  - type: web
+    name: frontdesk-api
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: FRONTDESK_SECRET_KEY
+        generateValue: true
+      - key: REQUIRE_AUTH
+        value: "false"
+      - key: FRONTDESK_CORS_ORIGINS
+        sync: false  # Set manually after Vercel deploy
+      - key: PYTHON_VERSION
+        value: "3.11.11"

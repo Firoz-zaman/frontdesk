@@ -29,9 +29,10 @@ export function useEventStream(onEvent, activeToken) {
     function connect() {
       if (isCancelled) return;
       const token = currentToken || localStorage.getItem('frontdesk_token');
+      const apiBase = import.meta.env.VITE_API_URL || '';
       const url = token
-        ? `/api/events/stream?token=${encodeURIComponent(token)}`
-        : '/api/events/stream';
+        ? `${apiBase}/api/events/stream?token=${encodeURIComponent(token)}`
+        : `${apiBase}/api/events/stream`;
 
       try {
         es = new EventSource(url);

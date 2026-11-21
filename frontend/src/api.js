@@ -1,4 +1,4 @@
-const API = '';  // Vite proxy handles /api -> localhost:8000
+const API = import.meta.env.VITE_API_URL || '';  // In dev, Vite proxy handles /api -> localhost:8000
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 

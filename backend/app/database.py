@@ -6,15 +6,21 @@ from .core.config import settings
 
 DATABASE_URL = settings.DATABASE_URL
 
+connect_args = {}
+if DATABASE_URL.startswith("sqlite"):
+    connect_args["check_same_thread"] = False
+
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False},  # SQLite specific
+    connect_args=connect_args,
 )
 
 
 @event.listens_for(engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
-    """Enable WAL mode, busy timeout, and normal sync for high concurrency."""
+    """Enable WAL mode, busy timeout, and normal sync for high concurrency (SQLite only)."""
+    if not settings.DATABASE_URL.startswith("sqlite"):
+        return
     try:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")

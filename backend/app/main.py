@@ -25,25 +25,28 @@ async def lifespan(app: FastAPI):
 
     # Create tables and execute idempotent migrations
     Base.metadata.create_all(bind=engine)
-    with engine.connect() as conn:
-        ticket_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(tickets)"))]
-        if "closed_at" not in ticket_cols:
-            conn.execute(text("ALTER TABLE tickets ADD COLUMN closed_at DATETIME"))
-            conn.commit()
-        if "customer_token_hash" not in ticket_cols:
-            conn.execute(text("ALTER TABLE tickets ADD COLUMN customer_token_hash VARCHAR(64)"))
-            conn.commit()
 
-        agent_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(agents)"))]
-        if "password_hash" not in agent_cols:
-            conn.execute(text("ALTER TABLE agents ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ''"))
-            conn.commit()
-        if "is_active" not in agent_cols:
-            conn.execute(text("ALTER TABLE agents ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
-            conn.commit()
-        if "last_login_at" not in agent_cols:
-            conn.execute(text("ALTER TABLE agents ADD COLUMN last_login_at DATETIME"))
-            conn.commit()
+    # SQLite-specific migrations
+    if settings.DATABASE_URL.startswith("sqlite"):
+        with engine.connect() as conn:
+            ticket_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(tickets)"))]
+            if "closed_at" not in ticket_cols:
+                conn.execute(text("ALTER TABLE tickets ADD COLUMN closed_at DATETIME"))
+                conn.commit()
+            if "customer_token_hash" not in ticket_cols:
+                conn.execute(text("ALTER TABLE tickets ADD COLUMN customer_token_hash VARCHAR(64)"))
+                conn.commit()
+
+            agent_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(agents)"))]
+            if "password_hash" not in agent_cols:
+                conn.execute(text("ALTER TABLE agents ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ''"))
+                conn.commit()
+            if "is_active" not in agent_cols:
+                conn.execute(text("ALTER TABLE agents ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+                conn.commit()
+            if "last_login_at" not in agent_cols:
+                conn.execute(text("ALTER TABLE agents ADD COLUMN last_login_at DATETIME"))
+                conn.commit()
 
     seed_database()
     yield

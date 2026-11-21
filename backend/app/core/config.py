@@ -19,7 +19,7 @@ class Settings:
     # Database
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "sqlite:////home/local-admin/project-11/backend/frontdesk.db",
+        f"sqlite:///{os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'frontdesk.db')}",
     )
 
     # CORS Configuration
