@@ -94,3 +94,25 @@ export async function resolveTicket(ticketId, agentId) {
   return res.json();
 }
 
+// Module 5: Lifecycle Policies (REQ-SLA-04 & REQ-SLA-05)
+export async function reopenTicket(ticketId, agentId, reason = '') {
+  const res = await fetch(`${API}/api/tickets/${ticketId}/reopen`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_id: agentId, reason }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to reopen ticket');
+  }
+  return res.json();
+}
+
+export async function triggerAutoClose() {
+  const res = await fetch(`${API}/api/tickets/auto-close`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error('Failed to evaluate auto-close policy');
+  return res.json();
+}
+

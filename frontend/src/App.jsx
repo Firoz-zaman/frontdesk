@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket, fetchMessages, postMessage, fetchAuditLogs, updatePriority, resolveTicket } from './api.js';
+import { fetchAgents, fetchTickets, fetchTicket, createTicket, claimTicket, fetchMessages, postMessage, fetchAuditLogs, updatePriority, resolveTicket, reopenTicket } from './api.js';
 
 const FILTERS = [
   { label: 'All', value: '' },
@@ -128,6 +128,9 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
   const [resolvingTicket, setResolvingTicket] = useState(false);
   const [updatingPriority, setUpdatingPriority] = useState(false);
 
+  // Module 5: Lifecycle Reopen state (REQ-SLA-05)
+  const [reopeningTicket, setReopeningTicket] = useState(false);
+
   // Load ticket messages whenever active ticket changes
   const loadMessages = useCallback(() => {
     if (!ticket) return;
@@ -182,6 +185,23 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
       alert(err.message || 'Failed to resolve ticket');
     } finally {
       setResolvingTicket(false);
+    }
+  };
+
+  // Module 5: Handle ticket reopening (REQ-SLA-05)
+  const handleReopen = async () => {
+    if (!currentAgent) { alert('Select an agent profile first.'); return; }
+    const reason = window.prompt('Reason for reopening ticket (optional):', '') || '';
+    setReopeningTicket(true);
+    try {
+      const updated = await reopenTicket(ticket.id, currentAgent.id, reason);
+      if (onTicketUpdated) onTicketUpdated(updated);
+      loadAudit();
+      loadMessages();
+    } catch (err) {
+      alert(err.message || 'Failed to reopen ticket');
+    } finally {
+      setReopeningTicket(false);
     }
   };
 
@@ -305,8 +325,32 @@ function TicketDetail({ ticket, onClaim, claiming, currentAgent, onTicketUpdated
       )}
       {ticket.status === 'done' && (
         <div className="resolved-banner">
-          ✅ <strong>Ticket Resolved</strong>
-          {ticket.resolved_at && <span> on {new Date(ticket.resolved_at).toLocaleString()}</span>}
+          <div>
+            ✅ <strong>Ticket Resolved</strong>
+            {ticket.resolved_at && <span> on {new Date(ticket.resolved_at).toLocaleString()}</span>}
+          </div>
+          <button
+            className="btn-reopen"
+            onClick={handleReopen}
+            disabled={reopeningTicket || !currentAgent}
+          >
+            {reopeningTicket ? 'Reopening…' : '🔄 Reopen Ticket'}
+          </button>
+        </div>
+      )}
+      {ticket.status === 'closed' && (
+        <div className="closed-banner">
+          <div>
+            🔒 <strong>Ticket Closed</strong>
+            {ticket.closed_at && <span> on {new Date(ticket.closed_at).toLocaleString()}</span>}
+          </div>
+          <button
+            className="btn-reopen"
+            onClick={handleReopen}
+            disabled={reopeningTicket || !currentAgent}
+          >
+            {reopeningTicket ? 'Reopening…' : '🔄 Reopen Ticket'}
+          </button>
         </div>
       )}
 

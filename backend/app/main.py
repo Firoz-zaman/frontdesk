@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import update
+from sqlalchemy import update, text
 from sqlalchemy.orm import Session
 
 from .database import engine, get_db, Base
@@ -21,6 +21,7 @@ from .schemas import (
     AuditLogOut,
     PriorityUpdateRequest,
     ResolveTicketRequest,
+    ReopenTicketRequest,
 )
 from .seed import seed_database
 from .utils import next_ticket_id
@@ -32,12 +33,25 @@ from .sla import (
     add_business_minutes,
     calculate_business_minutes_between,
 )
+from .lifecycle import (
+    can_reopen_ticket,
+    should_auto_close,
+    evaluate_auto_close_tickets,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create tables and seed on startup
     Base.metadata.create_all(bind=engine)
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(tickets)"))]
+            if "closed_at" not in cols:
+                conn.execute(text("ALTER TABLE tickets ADD COLUMN closed_at DATETIME"))
+                conn.commit()
+    except Exception:
+        pass
     seed_database()
     yield
 
@@ -88,6 +102,7 @@ def _ticket_to_out(ticket: Ticket) -> TicketOut:
         resolution_due_at=ticket.resolution_due_at,
         first_responded_at=ticket.first_responded_at,
         resolved_at=ticket.resolved_at,
+        closed_at=ticket.closed_at,
         sla_paused_at=ticket.sla_paused_at,
         sla_status=sla_info,
     )
@@ -98,6 +113,7 @@ def list_tickets(
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
+    evaluate_auto_close_tickets(db)
     query = db.query(Ticket)
     if status:
         query = query.filter(Ticket.status == status)
@@ -466,6 +482,67 @@ def resolve_ticket(
     db.commit()
     db.refresh(ticket)
     return _ticket_to_out(ticket)
+
+
+# ── Module 5: Lifecycle Inactivity & Reopening Policies ──
+
+@app.post("/api/tickets/{ticket_id}/reopen", response_model=TicketOut)
+def reopen_ticket(
+    ticket_id: str,
+    payload: Optional[ReopenTicketRequest] = None,
+    agent_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Enforce REQ-SLA-05: Reopen allowed within 7 calendar days of resolution/closure.
+    Attempts after 7 calendar days are strictly rejected with HTTP 400.
+    """
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    allowed, reason = can_reopen_ticket(ticket)
+    if not allowed:
+        raise HTTPException(status_code=400, detail=reason)
+
+    now = datetime.now(timezone.utc)
+    prev_status = ticket.status
+    ticket.status = "in_progress"
+    ticket.resolved_at = None
+    ticket.closed_at = None
+    ticket.sla_paused_at = None
+
+    effective_agent_id = (payload.agent_id if payload else None) or agent_id
+    actor_name = "Support Agent"
+    if effective_agent_id:
+        agent = db.query(Agent).filter(Agent.id == effective_agent_id).first()
+        if agent:
+            actor_name = agent.name
+
+    log_audit(
+        db=db,
+        ticket_id=ticket.id,
+        actor_type="agent",
+        actor_id=effective_agent_id,
+        actor_name=actor_name,
+        action="TICKET_REOPENED",
+        details={
+            "previous_status": prev_status,
+            "new_status": "in_progress",
+            "reason": payload.reason if payload else None,
+        },
+    )
+
+    db.commit()
+    db.refresh(ticket)
+    return _ticket_to_out(ticket)
+
+
+@app.post("/api/tickets/auto-close", response_model=list[TicketOut])
+def trigger_auto_close(db: Session = Depends(get_db)):
+    """Enforce REQ-SLA-04: Evaluate and auto-close tickets that have been waiting on customer >= 5 working days."""
+    closed = evaluate_auto_close_tickets(db)
+    return [_ticket_to_out(t) for t in closed]
+
 
 
 

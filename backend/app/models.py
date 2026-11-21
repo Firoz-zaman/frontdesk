@@ -47,6 +47,7 @@ class Ticket(Base):
     resolution_due_at = Column(DateTime(timezone=True), nullable=True)
     first_responded_at = Column(DateTime(timezone=True), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
     sla_paused_at = Column(DateTime(timezone=True), nullable=True)
     total_paused_minutes = Column(Integer, default=0, nullable=False)
 

@@ -43,6 +43,7 @@ class TicketOut(BaseModel):
     resolution_due_at: Optional[datetime] = None
     first_responded_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
     sla_paused_at: Optional[datetime] = None
     sla_status: Optional[dict[str, Any]] = None
 
@@ -56,6 +57,11 @@ class PriorityUpdateRequest(BaseModel):
 
 class ResolveTicketRequest(BaseModel):
     agent_id: Optional[str] = None
+
+
+class ReopenTicketRequest(BaseModel):
+    agent_id: Optional[str] = None
+    reason: Optional[str] = None
 
 
 

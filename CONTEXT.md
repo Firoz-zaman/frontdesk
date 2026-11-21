@@ -260,9 +260,103 @@ Regression Tests:
 
 ---
 
-## 7. Next Planned Step
+## 7. Step 5: Pluggable Module 5 — Lifecycle Policies (Inactivity Auto-Close & Reopening Guard)
 
-* **Step 5**: Pluggable Module 5 — Lifecycle Policies.
-  - Auto-close policy: Automatically close tickets after 5 working days in `waiting_on_customer`.
-  - Reopen policy: Reopen allowed within 7 calendar days of resolution; rejected after.
+### Requirements Addressed
+* **REQ-SLA-04: Auto-Close Inactive Tickets**:
+  - If a ticket remains in `waiting_on_customer` for $\ge$ 5 working days (45 working hours = 2,700 business minutes), the system automatically closes it.
+  - Automatically emits an immutable system audit event: `AUTO_CLOSED` (*"Auto-closed due to 1 week of customer inactivity (5 working days / 45 hours)."*).
+* **REQ-SLA-05: Reopening Window Guard**:
+  - Customers or agents can reopen a resolved or closed ticket within 7 calendar days.
+  - Reopening after 7 calendar days is strictly rejected with `HTTP 400 Bad Request`:
+    > *"Tickets closed more than 1 week ago cannot be reopened. Please submit a new ticket."*
+  - Reopening records `TICKET_REOPENED` in the immutable audit log and transitions status back to `in_progress`.
+
+### Implementation Pieces:
+
+#### Piece 1: Pure Lifecycle Policy Engine (`backend/app/lifecycle.py`)
+- Independent policy service:
+  - `can_reopen_ticket(ticket, current_time)`: Validates status (`done` or `closed`), computes elapsed calendar time since `resolved_at` or `closed_at`. Rejects after 7 days with the specification-required message.
+  - `should_auto_close(ticket, current_time)`: Validates `waiting_on_customer` status, computes elapsed working minutes using `calculate_business_minutes_between(sla_paused_at, now)`. Flags for closure when $\ge$ 2,700 business minutes (5 working days).
+  - `evaluate_auto_close_tickets(db, current_time)`: Scans eligible tickets, transitions status to `closed`, records `closed_at`, clears `sla_paused_at`, and emits `AUTO_CLOSED` system audit event.
+
+#### Piece 2: Database Schema & API Endpoints (`backend/app/models.py`, `backend/app/schemas.py`, `backend/app/main.py`)
+- Added `closed_at` column to `Ticket` model and `TicketOut` schema.
+- Added `ReopenTicketRequest` DTO (`agent_id`, `reason`).
+- Dynamic schema compatibility check in `lifespan` ensuring `closed_at` is safely added to existing SQLite tables.
+- Endpoint `POST /api/tickets/{ticket_id}/reopen`:
+  - Validates eligibility with `can_reopen_ticket`.
+  - Transitions ticket back to `in_progress`, clears `resolved_at` and `closed_at`.
+  - Emits `TICKET_REOPENED` audit event.
+- Endpoint `POST /api/tickets/auto-close`:
+  - Runs batch evaluation and auto-closes inactive tickets.
+- `GET /api/tickets`: Automatically triggers `evaluate_auto_close_tickets` so queues reflect up-to-date statuses.
+
+#### Piece 3: Frontend Reopen & Lifecycle UI (`frontend/src/`)
+- `frontend/src/api.js`: Added `reopenTicket` and `triggerAutoClose`.
+- `frontend/src/App.jsx`:
+  - Detail Pane: When viewing a `done` or `closed` ticket, displays `🔄 Reopen Ticket` action button.
+  - Reopen action prompts for an optional reason and handles rejection alerts gracefully (e.g., displaying the 7-day cutoff rule).
+  - Added dedicated `🔒 Ticket Closed` banner when status is `closed`.
+- `frontend/src/index.css`: Added styles for `.btn-reopen`, `.closed-banner`, `.action-ticket_reopened`, `.action-auto_closed`.
+
+#### Piece 4: Automated Verification Test Suite (`backend/tests/test_lifecycle_policies.py`)
+- 4 comprehensive tests:
+  1. `test_reopen_within_seven_days_allowed`: Verified reopening resolved ticket within 7 calendar days transitions status to `in_progress` and logs `TICKET_REOPENED`.
+  2. `test_reopen_after_seven_days_rejected`: Verified attempting to reopen a ticket resolved 10 days ago is rejected with `HTTP 400` and exact specification error message.
+  3. `test_reopen_open_ticket_rejected`: Verified attempting to reopen an already active ticket returns `HTTP 400`.
+  4. `test_auto_close_inactivity_policy`: Verified tickets waiting on customers for < 5 working days remain untouched, while tickets exceeding 5 working days (2,700 business minutes) auto-close to `closed` with `AUTO_CLOSED` audit log.
+
+---
+
+## 8. Comprehensive Verification Test Suite Results (Steps 1, 2, 3, 4, and 5)
+
+```
+=== Running Atomic Ticket Claiming Verification Tests ===
+[TEST 1] Response status codes: 409 and 200
+[TEST 1] PASS: Ticket safely assigned with status 'in_progress'
+[TEST 2] PASS: Subsequent claim rejected with 409
+[TEST 3] PASS: Invalid agent returned 404
+[TEST 4] PASS: Nonexistent ticket returned 404
+ALL ATOMIC CLAIMING TESTS PASSED SUCCESSFULLY! (INC-0291 Solved)
+
+=== Running Note Isolation & Security Tests (INC-0304) ===
+[TEST 1] PASS: Zero leakage in customer API response! Private note strictly omitted.
+[TEST 1] PASS: Agent correctly sees both internal notes and public replies.
+[TEST 2] PASS: Customer cannot force is_private=True (sanitized to False).
+[TEST 3] PASS: Status moved to 'waiting_on_customer' after public agent reply.
+[TEST 3] PASS: Status returned to 'in_progress' when customer responded.
+ALL NOTE ISOLATION TESTS PASSED SUCCESSFULLY! (INC-0304 Solved)
+
+=== Running Audit Trail & Non-Repudiation Tests (INC-0318) ===
+[TEST 1] PASS: TICKET_CREATED, TICKET_CLAIMED, INTERNAL_NOTE_ADDED, PUBLIC_REPLY_SENT, CUSTOMER_REPLY_RECEIVED logged.
+[TEST 2] PASS: INC-0318 dispute conclusively resolved with mathematical timestamps.
+[TEST 3] PASS: Audit log is strictly read-only; tampering endpoints are disallowed (405).
+ALL AUDIT TRAIL TESTS PASSED SUCCESSFULLY! (INC-0318 Solved)
+
+=== Running Working Hours SLA Tests (INC-0327) ===
+[TEST 1] ✓ Same-day addition, weekend skip, and festival holiday skip passed.
+[TEST 2] ✓ Urgent, medium, and small SLA deadlines computed correctly.
+[TEST 3] ✓ SLA paused on waiting_on_customer, resumed on customer reply.
+[TEST 4] ✓ Mid-lifecycle priority escalation recalculated SLA and logged PRIORITY_CHANGED.
+[TEST 5] ✓ Ticket resolution marked status 'done' and froze SLA as 'completed'.
+ALL STAGE 4 SLA ENGINE TESTS PASSED SUCCESSFULLY!
+
+=== Running Lifecycle Inactivity & Reopening Policy Tests (REQ-SLA-04 & REQ-SLA-05) ===
+[TEST 1] ✓ Ticket reopened successfully within 7 days, logged TICKET_REOPENED.
+[TEST 2] ✓ Reopening after 7 days strictly rejected with HTTP 400: 'Tickets closed more than 1 week ago cannot be reopened. Please submit a new ticket.'
+[TEST 3] ✓ Rejecting reopen on active ticket passed.
+[TEST 4] ✓ Tickets waiting on customers >= 5 working days auto-closed to 'closed' and logged AUTO_CLOSED.
+ALL STAGE 5 LIFECYCLE POLICY TESTS PASSED SUCCESSFULLY!
+```
+
+---
+
+## 9. Next Planned Step
+
+* **Step 6**: Packaging & Deployment.
+  - Production containerization & startup script.
+  - Comprehensive documentation & user guide.
+  - Evaluation summary.
+
 
