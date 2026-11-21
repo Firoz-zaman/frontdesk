@@ -248,6 +248,12 @@ def update_ticket_priority(
 
     db.commit()
     db.refresh(ticket)
+
+    broadcaster.publish("TICKET_PRIORITY_CHANGED", {
+        "ticket_id": ticket.id,
+        "priority": new_p,
+    })
+
     return _ticket_to_out(ticket)
 
 
@@ -349,4 +355,12 @@ def reopen_ticket(
 
     db.commit()
     db.refresh(ticket)
+
+    broadcaster.publish("TICKET_REOPENED", {
+        "ticket_id": ticket.id,
+        "agent_id": effective_agent_id,
+        "agent_name": actor_name,
+        "status": "in_progress",
+    })
+
     return _ticket_to_out(ticket)

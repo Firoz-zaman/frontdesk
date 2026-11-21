@@ -47,9 +47,14 @@ export function DashboardLayout() {
         return;
       }
       if (
-        ['TICKET_CLAIMED', 'PUBLIC_REPLY_SENT', 'CUSTOMER_REPLY_RECEIVED', 'TICKET_RESOLVED'].includes(
-          eventType
-        )
+        [
+          'TICKET_CLAIMED',
+          'PUBLIC_REPLY_SENT',
+          'CUSTOMER_REPLY_RECEIVED',
+          'TICKET_RESOLVED',
+          'TICKET_REOPENED',
+          'TICKET_PRIORITY_CHANGED',
+        ].includes(eventType)
       ) {
         loadTickets();
         if (selectedId && data.ticket_id === selectedId) {

@@ -96,7 +96,14 @@ def evaluate_auto_close_tickets(db: Session, current_time: Optional[datetime] = 
 
     if auto_closed:
         db.commit()
+        from .events import broadcaster
         for t in auto_closed:
             db.refresh(t)
+            broadcaster.publish("TICKET_RESOLVED", {
+                "ticket_id": t.id,
+                "status": "closed",
+                "resolved_by": "System Automator",
+                "closed_at": now.isoformat(),
+            })
 
     return auto_closed

@@ -55,6 +55,8 @@ export function useEventStream(onEvent, activeToken) {
         'PUBLIC_REPLY_SENT',
         'CUSTOMER_REPLY_RECEIVED',
         'TICKET_RESOLVED',
+        'TICKET_REOPENED',
+        'TICKET_PRIORITY_CHANGED',
         'SLA_BREACH_WARNING',
       ];
 
