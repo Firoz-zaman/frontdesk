@@ -22,8 +22,18 @@ class Settings:
         "sqlite:////home/local-admin/project-11/backend/frontdesk.db",
     )
 
-    # CORS
-    CORS_ORIGINS: List[str] = ["*"]
+    # CORS Configuration
+    # Note: When allow_credentials=True, W3C CORS forbids wildcard "*".
+    # Specific origins must be listed.
+    _cors_env: str = os.getenv("FRONTDESK_CORS_ORIGINS", "")
+    CORS_ORIGINS: List[str] = [
+        origin.strip() for origin in _cors_env.split(",") if origin.strip()
+    ] if _cors_env else [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
 
 settings = Settings()
