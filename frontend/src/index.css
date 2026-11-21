@@ -1,3 +1,6 @@
+@import './styles/tokens.css';
+@import './styles/components.css';
+
 /* ── Frontdesk — Step 0 Core Base Styles ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
